@@ -1,0 +1,159 @@
+---
+title: "Demographics for QMIN MC Participants"
+output: html_notebook
+---
+
+
+```{r}
+library(cowplot)
+library(data.table)
+library(e1071)
+library(dplyr)
+library(ggplot2)
+library(plot.matrix)
+library(proxy)
+library(psych)
+library(tidyr)
+library(stringr)
+library(RPMG)
+library(viridis)
+library(effectsize)
+library(corrplot)
+library(ggseg)
+library(ggsegExtra) ## you may need this for the proportional outlier maps depending on your R version
+library(ggsegDesterieux) ## this is important for the proportional outlier maps 
+library(ggpubr)
+library(lme4)
+library(lmtest)
+library(arsenal)
+library(lmerTest)
+library(MuMIn)
+library(effects)
+library(ggeffects)
+library(readr)
+rm(list = ls())
+```
+#Reload df
+
+```{r}
+df <- read.csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Final files/toc_df.csv")
+df_ACE3_filtered <- read.csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Final files/df_ACE3_filtered.csv")
+df_ACER_filtered <- read.csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Final files/df_ACER_filtered.csv")
+```
+#Descriptive statistics for sex and age
+```{r}
+gender_stats <- df %>%
+  group_by(diagnosis) %>%
+  summarize(
+    males = sum(sex == "Male", na.rm = TRUE),
+    females = sum(sex == "Female", na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# Calculate overall gender statistics (ungrouped)
+overall_gender <- df %>%
+  summarize(
+    diagnosis = "Overall",
+    males = sum(sex == "Male", na.rm = TRUE),
+    females = sum(sex == "Female", na.rm = TRUE)
+  )
+print(gender_stats)
+
+age_stats <- df %>%
+  group_by(diagnosis) %>%
+  summarize(
+    n = sum(!is.na(age)),
+    mean_age = mean(age, na.rm = TRUE),
+    sd_age = sd(age, na.rm = TRUE),
+    min_age = min(age, na.rm = TRUE),
+    max_age = max(age, na.rm = TRUE)
+  ) %>%
+ ungroup()
+
+# Calculate overall statistics (ungrouped)
+overall_stats <- df %>%
+  summarize(
+    diagnosis = "Overall",
+    n = sum(!is.na(age)),
+    mean_acer = mean(age, na.rm = TRUE),
+    sd_acer = sd(age, na.rm = TRUE),
+    min_acer = min(age, na.rm = TRUE),
+    max_acer = max(age, na.rm = TRUE)
+  )
+age_stats <- bind_rows(age_stats, overall_stats)
+print(age_stats)
+```
+
+#Demographic statistics for ACER_scores and ACE3_scores 
+```{r}
+acer_stats <- df_ACER_filtered %>%
+  group_by(diagnosis) %>%
+  summarize(
+    n = sum(!is.na(ACER_scores)),
+    mean_acer = mean(ACER_scores, na.rm = TRUE),
+    sd_acer = sd(ACER_scores, na.rm = TRUE),
+    min_acer = min(ACER_scores, na.rm = TRUE),
+    max_acer = max(ACER_scores, na.rm = TRUE)
+  ) %>%
+ ungroup()
+
+# Calculate overall statistics (ungrouped)
+overall_stats <- df_ACER_filtered %>%
+  summarize(
+    diagnosis = "Overall",
+    n = sum(!is.na(ACER_scores)),
+    mean_acer = mean(ACER_scores, na.rm = TRUE),
+    sd_acer = sd(ACER_scores, na.rm = TRUE),
+    min_acer = min(ACER_scores, na.rm = TRUE),
+    max_acer = max(ACER_scores, na.rm = TRUE)
+  )
+acer_stats <- bind_rows(acer_stats, overall_stats)
+print(acer_stats)
+
+ace3_stats <- df_ACE3_filtered %>%
+  group_by(diagnosis) %>%
+  summarize(
+    n = sum(!is.na(ACE3_scores)),
+    mean_ace3 = mean(ACE3_scores, na.rm = TRUE),
+    sd_ace3 = sd(ACE3_scores, na.rm = TRUE),
+    min_ace3 = min(ACE3_scores, na.rm = TRUE),
+    max_ace3 = max(ACE3_scores, na.rm = TRUE)
+  ) %>%
+ ungroup()
+
+# Calculate overall statistics (ungrouped)
+overall_stats <- df_ACE3_filtered %>%
+  summarize(
+    diagnosis = "Overall",
+    n = sum(!is.na(ACE3_scores)),
+    mean_ace3 = mean(ACE3_scores, na.rm = TRUE),
+    sd_ace3 = sd(ACE3_scores, na.rm = TRUE),
+    min_ace3 = min(ACE3_scores, na.rm = TRUE),
+    max_ace3 = max(ACE3_scores, na.rm = TRUE)
+  )
+ace3_stats <- bind_rows(ace3_stats, overall_stats)
+print(ace3_stats)
+```
+#Ethnicity and Education demographics by diagnosis group
+```{r}
+#Calculate mean, sd, min, and max of Years of education for each diagnostic group
+education_summary <- df %>%
+  group_by(diagnosis) %>%
+  summarise( n = sum(!is.na(`Years.of.education`)),
+    mean_education = mean(`Years.of.education`, na.rm = TRUE),
+    sd_education = sd(`Years.of.education`, na.rm = TRUE),
+    min_education = min(`Years.of.education`, na.rm = TRUE),
+    max_education = max(`Years.of.education`, na.rm = TRUE)
+  )
+# Print the summary
+print(education_summary)
+
+# Summarize ethnicity by diagnostic groups
+ethnicity_summary <- df %>%
+  group_by(diagnosis, Ethnicity) %>%
+  summarise(count = n()) %>%
+  arrange(diagnosis, desc(count))
+# Print the summary
+print(ethnicity_summary)
+```
+
