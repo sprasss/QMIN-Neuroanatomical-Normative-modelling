@@ -1,0 +1,1490 @@
+title: "Analysis Part 2 Regional and Hamming distances"
+Main Authors: Serena Verdi and James Cole 
+Adapted for QMIN-MC data sample by candidate HZWC3
+output: html_notebook
+---
+This script is a continuation of the "Analysis Part 1 - tOC and mean thickness" notebook. 
+In this second part, the following can be accomplished:
+(1) Identifying the region with the highest outliers in each diagnostic group alongside the percentage of participants who exhibit this specific outlier 
+(2) Mann Whitney, Wilcoxon Rank Sum Test and FDR corrections to identify any regions significantly different in atrophy patterns between the groups
+(3) Calculation of Hamming distance medians for each diagnostic group as well as for each subject 
+(4) Plotting of proportional maps for each diagnostic group to demonstrate vast differences in cortical thicknesses and subcortical volumes 
+---
+#Load libraries
+```{r}
+library(cowplot)
+library(data.table)
+library(e1071)
+library(dplyr)
+library(ggplot2)
+library(plot.matrix)
+library(proxy)
+library(psych)
+library(tidyr)
+library(stringr)
+library(RPMG)
+library(viridis)
+library(effectsize)
+library(corrplot)
+library(ggseg)
+library(ggsegExtra) ## you may need this for the proportional outlier maps depending on your R version
+library(ggsegDesterieux) ## this is important for the proportional outlier maps 
+library(ggpubr)
+library(lme4)
+library(lmtest)
+library(arsenal)
+library(lmerTest)
+library(MuMIn)
+library(effects)
+library(ggeffects)
+library(readr)
+library(dplyr)
+
+```
+#Load files
+```{r}
+df <- read.csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Final files/toc_df.csv")
+df$diagnosis <- as.factor(df$diagnosis)
+df$sex<- as.factor(df$sex)
+df_ACE3_filtered <- read.csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Final files/df_ACE3_filtered.csv")
+df_ACER_filtered <- read.csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Final files/df_ACER_filtered.csv")
+df_edu_filtered <- read.csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Final files/df_edu_filtered.csv")
+```
+#----------------------------------------------
+# - - - 5. DIAGNOSIS - Regional Analysis - - - 
+#----------------------------------------------
+# Which regions have the highest outliers in each group?
+```{r}
+# AD
+# maximum number of outliers
+
+roi_with_most_outliers <- df %>% filter(diagnosis == "AD") %>%
+  select(contains("_bin")) %>%
+  colSums() %>%
+  max()
+
+diagnosis_size <- count(df %>% filter(diagnosis == "AD"))
+print(diagnosis_size)
+
+z <- df %>% filter(diagnosis == "AD") %>%
+  select(contains("_bin")) %>%
+  colSums()
+length(which(z > 0))
+
+# maximum number of regions with outliers
+roi_with_at_least_one_outlier <- length(which(z > 0))
+roi_with_at_least_one_outlier
+
+#Which region in this group has the highest number of outliers? What is its proportion? 
+region_with_most_outliers <- names(z)[which.max(z)]
+print(region_with_most_outliers)
+number_of_outliers_in_region <- max(z)
+print(number_of_outliers_in_region)
+
+# region with the highest proportion of outliers
+roi_with_most_outliers/diagnosis_size
+rm(z)
+
+df %>% filter(diagnosis == "AD") %>%
+  select(contains("tOC")) %>%
+  colSums() %>%
+  median() 
+
+d <- df %>% filter(diagnosis == "AD") 
+median(d$tOC)
+range(d$tOC)
+```
+#MCI proportional outliers 
+```{r}
+# maximum number of outliers
+roi_with_most_outliers <- df %>% filter(diagnosis == "MCI") %>%
+  select(contains("_bin")) %>%
+  colSums() %>%
+  max()
+
+diagnosis_size <- count(df %>% filter(diagnosis == "MCI"))
+print(diagnosis_size)
+
+z <- df %>% filter(diagnosis == "MCI") %>%
+  select(contains("_bin")) %>%
+  colSums()
+length(which(z > 0))
+
+# maximum number of regions with outliers
+roi_with_at_least_one_outlier <- length(which(z > 0))
+roi_with_at_least_one_outlier
+
+#Which region in this group has the highest number of outliers? What is its proportion? 
+region_with_most_outliers <- names(z)[which.max(z)]
+print(region_with_most_outliers)
+number_of_outliers_in_region <- max(z)
+print(number_of_outliers_in_region)
+
+# region with the highest proportion of outliers
+roi_with_most_outliers/diagnosis_size
+rm(z)
+
+df %>% filter(diagnosis == "MCI") %>%
+  select(contains("tOC")) %>%
+  colSums() %>%
+  median() 
+
+d <- df %>% filter(diagnosis == "MCI") 
+median(d$tOC)
+range(d$tOC)
+```
+#FTD propotional outliers
+```{r}
+# maximum number of outliers
+roi_with_most_outliers <- df %>% filter(diagnosis == "Frontotemporal dementia") %>%
+  select(contains("_bin")) %>%
+  colSums() %>%
+  max()
+
+diagnosis_size <- count(df %>% filter(diagnosis == "Frontotemporal dementia"))
+print(diagnosis_size)
+
+z <- df %>% filter(diagnosis == "Frontotemporal dementia") %>%
+  select(contains("_bin")) %>%
+  colSums()
+length(which(z > 0))
+
+# maximum number of regions with outliers
+roi_with_at_least_one_outlier <- length(which(z > 0))
+roi_with_at_least_one_outlier
+
+#Which region in this group has the highest number of outliers? What is its proportion? 
+region_with_most_outliers <- names(z)[which.max(z)]
+print(region_with_most_outliers)
+number_of_outliers_in_region <- max(z)
+print(number_of_outliers_in_region)
+
+# region with the highest proportion of outliers
+roi_with_most_outliers/diagnosis_size
+rm(z)
+
+df %>% filter(diagnosis == "Frontotemporal dementia") %>%
+  select(contains("tOC")) %>%
+  colSums() %>%
+  median() 
+
+d <- df %>% filter(diagnosis == "Frontotemporal dementia") 
+median(d$tOC)
+range(d$tOC)
+
+```
+# Mixed dementia (AD and vascular dementia)
+```{r}
+# maximum number of outliers
+roi_with_most_outliers <- df %>% filter(diagnosis == "Mixed dementia (AD and vascular dementia)") %>%
+  select(contains("_bin")) %>%
+  colSums() %>%
+  max()
+
+diagnosis_size <- count(df %>% filter(diagnosis == "Mixed dementia (AD and vascular dementia)"))
+print(diagnosis_size)
+
+z <- df %>% filter(diagnosis == "Mixed dementia (AD and vascular dementia)") %>%
+  select(contains("_bin")) %>%
+  colSums()
+length(which(z > 0))
+
+# maximum number of regions with outliers
+roi_with_at_least_one_outlier <- length(which(z > 0))
+roi_with_at_least_one_outlier
+
+#Which region in this group has the highest number of outliers? What is its proportion? 
+region_with_most_outliers <- names(z)[which.max(z)]
+print(region_with_most_outliers)
+number_of_outliers_in_region <- max(z)
+print(number_of_outliers_in_region)
+
+# region with the highest proportion of outliers
+roi_with_most_outliers/diagnosis_size
+rm(z)
+
+df %>% filter(diagnosis == "Mixed dementia (AD and vascular dementia)") %>%
+  select(contains("tOC")) %>%
+  colSums() %>%
+  median() 
+
+d <- df %>% filter(diagnosis == "Mixed dementia (AD and vascular dementia)") 
+median(d$tOC)
+range(d$tOC)
+```
+#Other non-AD Dementias
+```{r}
+# maximum number of outliers
+roi_with_most_outliers <- df %>% filter(diagnosis == "Other non-AD Dementias") %>%
+  select(contains("_bin")) %>%
+  colSums() %>%
+  max()
+
+diagnosis_size <- count(df %>% filter(diagnosis == "Other non-AD Dementias"))
+print(diagnosis_size)
+
+z <- df %>% filter(diagnosis == "Other non-AD Dementias") %>%
+  select(contains("_bin")) %>%
+  colSums()
+length(which(z > 0))
+
+# maximum number of regions with outliers
+roi_with_at_least_one_outlier <- length(which(z > 0))
+roi_with_at_least_one_outlier
+
+#Which region in this group has the highest number of outliers? What is its proportion? 
+region_with_most_outliers <- names(z)[which.max(z)]
+print(region_with_most_outliers)
+number_of_outliers_in_region <- max(z)
+print(number_of_outliers_in_region)
+
+# region with the highest proportion of outliers
+roi_with_most_outliers/diagnosis_size
+rm(z)
+
+df %>% filter(diagnosis == "Other non-AD Dementias") %>%
+  select(contains("tOC")) %>%
+  colSums() %>%
+  median() 
+
+d <- df %>% filter(diagnosis == "Other non-AD Dementias") 
+median(d$tOC)
+range(d$tOC)
+```
+#----------------------------------------------
+# - - - Regional analysis - - -
+#----------------------------------------------
+```{r}
+# Kruskal-Wallis and p-value Calculation
+df.stats <- as.data.frame(sapply(X = df[,grep("_bin", names(df),value = T)], FUN = function(x) kruskal.test(x ~ df$diagnosis)$p.value))
+names(df.stats) <- "p_value"
+setDT(df.stats, keep.rownames = "ROI")
+head(df.stats, 20)
+
+# FDR correction
+df.stats <- cbind(df.stats, p.adjust(df.stats$p_value, method = "fdr"))
+names(df.stats)[3] <- "FDR.pvalue"
+head(df.stats)
+
+# Kruskal-Wallis H-statistics Calculation
+df.f_stats <- as.data.frame(sapply(X = df[,grep("_bin", names(df),value = T)], FUN = function(x) kruskal.test(x ~ df$diagnosis)$statistic))
+names(df.f_stats) <- "H_stat"
+setDT(df.f_stats, keep.rownames = "ROI")
+head(df.f_stats, 20)
+
+# ROIs significant post FDR correction
+length(which(df.stats$FDR.pvalue < 0.05))
+
+# List significant ROIs
+df.stats[which(df.stats$FDR.pvalue < 0.05),]
+```
+#- Differences of outliers in each group (using t-tests)
+# 1. AD vs MCI t-test
+```{r}
+# Filter the data to include only rows where diagnosis is "AD" or "MCI"
+df.AM.stats <- subset(df, diagnosis %in% c("AD", "MCI"))
+df.AM.stats <- as.data.frame(sapply(df.AM.stats[,grep("_bin", names(df.AM.stats),value = T)], function(x) wilcox.test(x ~ df.AM.stats$diagnosis)$p.value)) 
+names(df.AM.stats) <- "p_value"
+setDT(df.AM.stats, keep.rownames = "ROI")
+head(df.AM.stats, 168)
+
+# #FDR correction
+df.AM.stats <- cbind(df.AM.stats, p.adjust(df.AM.stats$p_value), method = "fdr")
+names(df.AM.stats)[3] <- "FDR.pvalue"
+head(df.AM.stats)
+# 
+# #ROIs that are significant after FDR correction. There are `r length(which(df.stats$FDR.pvalue <0.05))` corrected ROIs that remain significant.
+df.AM.stats[which(df.AM.stats$FDR.pvalue <0.05),]
+df_AM_to_edit <- df.AM.stats[which(df.AM.stats$FDR.pvalue <0.05),]
+```
+# 2. AD vs FTD t-test
+```{r}
+
+df.AF.stats <- subset(df, diagnosis %in% c("AD", "Frontotemporal dementia"))
+df.AF.stats <- as.data.frame(sapply(df.AF.stats[,grep("_bin", names(df.AF.stats),value = T)], function(x) wilcox.test (x ~ df.AF.stats$diagnosis)$p.value)) 
+names(df.AF.stats) <- "p_value"
+setDT(df.AF.stats, keep.rownames = "ROI")
+head(df.AF.stats, 168)
+
+# #FDR correction
+df.AF.stats <- cbind(df.AF.stats, p.adjust(df.AF.stats$p_value), method = "fdr")
+names(df.AF.stats)[3] <- "FDR.pvalue"
+head(df.AF.stats)
+# 
+# #ROIs that are significant after FDR correction. There are `r length(which(df.stats$FDR.pvalue <0.05))` corrected ROIs that remain significant.
+df.AF.stats[which(df.AF.stats$FDR.pvalue <0.05),]
+df_AF_to_edit <- df.AF.stats[which(df.AF.stats$FDR.pvalue <0.05),]
+```
+# 3. AD x Mixed dementias
+```{r}
+
+df.AX.stats <- subset(df, diagnosis %in% c("AD", "Mixed dementia (AD and vascular dementia)"))
+
+df.AX.stats <- as.data.frame(sapply(df.AX.stats[,grep("_bin", names(df.AX.stats),value = T)], function(x) wilcox.test(x ~ df.AX.stats$diagnosis)$p.value)) 
+names(df.AX.stats) <- "p_value"
+setDT(df.AX.stats, keep.rownames = "ROI")
+head(df.AX.stats, 168)
+
+# #FDR correction
+df.AX.stats <- cbind(df.AX.stats, p.adjust(df.AX.stats$p_value), method = "fdr")
+names(df.AX.stats)[3] <- "FDR.pvalue"
+head(df.AX.stats)
+# 
+# #ROIs that are significant after FDR correction. There are `r length(which(df.stats$FDR.pvalue <0.05))` corrected ROIs that remain significant.
+df.AX.stats[which(df.AX.stats$FDR.pvalue <0.05),]
+df_AX_to_edit <- df.AX.stats[which(df.AX.stats$FDR.pvalue <0.05),]
+```
+# 4. AD x Other non-AD Dementias
+```{r}
+
+df.AO.stats <- subset(df, diagnosis %in% c("AD", "Other non-AD Dementias"))
+
+df.AO.stats <- as.data.frame(sapply(df.AO.stats[,grep("_bin", names(df.AO.stats),value = T)], function(x) wilcox.test(x ~ df.AO.stats$diagnosis)$p.value)) 
+names(df.AO.stats) <- "p_value"
+setDT(df.AO.stats, keep.rownames = "ROI")
+head(df.AO.stats, 168)
+
+# #FDR correction
+df.AO.stats <- cbind(df.AO.stats, p.adjust(df.AO.stats$p_value), method = "fdr")
+names(df.AO.stats)[3] <- "FDR.pvalue"
+head(df.AO.stats)
+# 
+# #ROIs that are significant after FDR correction. There are `r length(which(df.stats$FDR.pvalue <0.05))` corrected ROIs that remain significant.
+df.AO.stats[which(df.AO.stats$FDR.pvalue <0.05),]
+df_AO_to_edit <- df.AO.stats[which(df.AO.stats$FDR.pvalue <0.05),]
+
+```
+# MCI x FTD
+```{r}
+
+df.MF.stats <- subset(df, diagnosis %in% c("MCI", "Frontotemporal dementia"))
+
+df.MF.stats <- as.data.frame(sapply(df.MF.stats[,grep("_bin", names(df.MF.stats),value = T)], function(x) wilcox.test(x ~ df.MF.stats$diagnosis)$p.value)) 
+names(df.MF.stats) <- "p_value"
+setDT(df.MF.stats, keep.rownames = "ROI")
+head(df.MF.stats, 168)
+
+# #FDR correction
+df.MF.stats <- cbind(df.MF.stats, p.adjust(df.MF.stats$p_value), method = "fdr")
+names(df.MF.stats)[3] <- "FDR.pvalue"
+head(df.MF.stats)
+# 
+# #ROIs that are significant after FDR correction. There are `r length(which(df.stats$FDR.pvalue <0.05))` corrected ROIs that remain significant.
+df.MF.stats[which(df.MF.stats$FDR.pvalue <0.05),]
+df_MF_to_edit <- df.MF.stats[which(df.MF.stats$FDR.pvalue <0.05),]
+
+```
+#MCI x Mixed 
+```{r}
+
+df.MM.stats <- subset(df, diagnosis %in% c("MCI", "Mixed dementia (AD and vascular dementia)"))
+
+df.MM.stats <- as.data.frame(sapply(df.MM.stats[,grep("_bin", names(df.MM.stats),value = T)], function(x) wilcox.test(x ~ df.MM.stats$diagnosis)$p.value)) 
+names(df.MM.stats) <- "p_value"
+setDT(df.MM.stats, keep.rownames = "ROI")
+head(df.MM.stats, 168)
+
+# #FDR correction
+df.MM.stats <- cbind(df.MM.stats, p.adjust(df.MM.stats$p_value), method = "fdr")
+names(df.MM.stats)[3] <- "FDR.pvalue"
+head(df.MM.stats)
+# 
+# #ROIs that are significant after FDR correction. There are `r length(which(df.stats$FDR.pvalue <0.05))` corrected ROIs that remain significant.
+df.MM.stats[which(df.MM.stats$FDR.pvalue <0.05),]
+df_MM_to_edit <- df.MM.stats[which(df.MM.stats$FDR.pvalue <0.05),]
+```
+#MCI x Other non-AD dementias
+```{r}
+
+df.MO.stats <- subset(df, diagnosis %in% c("MCI", "Other non-AD Dementias"))
+
+df.MO.stats <- as.data.frame(sapply(df.MO.stats[,grep("_bin", names(df.MO.stats),value = T)], function(x) wilcox.test (x ~ df.MO.stats$diagnosis)$p.value)) 
+names(df.MO.stats) <- "p_value"
+setDT(df.MO.stats, keep.rownames = "ROI")
+head(df.MO.stats, 168)
+
+# #FDR correction
+df.MO.stats <- cbind(df.MO.stats, p.adjust(df.MO.stats$p_value), method = "fdr")
+names(df.MO.stats)[3] <- "FDR.pvalue"
+head(df.MO.stats)
+# 
+# #ROIs that are significant after FDR correction. There are `r length(which(df.stats$FDR.pvalue <0.05))` corrected ROIs that remain significant.
+df.MO.stats[which(df.MO.stats$FDR.pvalue <0.05),]
+df_MO_to_edit <- df.MO.stats[which(df.MO.stats$FDR.pvalue <0.05),]
+```
+
+#FTD x Mixed
+```{r}
+
+df.FM.stats <- subset(df, diagnosis %in% c("Frontotemporal dementia", "Mixed dementia (AD and vascular dementia)"))
+
+df.FM.stats <- as.data.frame(sapply(df.FM.stats[,grep("_bin", names(df.FM.stats),value = T)], function(x) wilcox.test(x ~ df.FM.stats$diagnosis)$p.value)) 
+names(df.FM.stats) <- "p_value"
+setDT(df.FM.stats, keep.rownames = "ROI")
+head(df.FM.stats, 168)
+
+# #FDR correction
+df.FM.stats <- cbind(df.FM.stats, p.adjust(df.FM.stats$p_value), method = "fdr")
+names(df.FM.stats)[3] <- "FDR.pvalue"
+head(df.FM.stats)
+# 
+# #ROIs that are significant after FDR correction. There are `r length(which(df.stats$FDR.pvalue <0.05))` corrected ROIs that remain significant.
+df.FM.stats[which(df.FM.stats$FDR.pvalue <0.05),]
+df_FM_to_edit <- df.FM.stats[which(df.FM.stats$FDR.pvalue <0.05),]
+
+```
+#FTD x Other 
+
+```{r}
+
+df.FO.stats <- subset(df, diagnosis %in% c("Frontotemporal dementia", "Other non-AD Dementias"))
+
+df.FO.stats <- as.data.frame(sapply(df.FO.stats[,grep("_bin", names(df.FO.stats),value = T)], function(x) wilcox.test(x ~ df.FO.stats$diagnosis)$p.value)) 
+names(df.FO.stats) <- "p_value"
+setDT(df.FO.stats, keep.rownames = "ROI")
+head(df.FO.stats, 168)
+
+# #FDR correction
+df.FO.stats <- cbind(df.FO.stats, p.adjust(df.FO.stats$p_value), method = "fdr")
+names(df.FO.stats)[3] <- "FDR.pvalue"
+head(df.FO.stats)
+# 
+# #ROIs that are significant after FDR correction. There are `r length(which(df.stats$FDR.pvalue <0.05))` corrected ROIs that remain significant.
+df.FO.stats[which(df.FO.stats$FDR.pvalue <0.05),]
+df_FO_to_edit <- df.FO.stats[which(df.FO.stats$FDR.pvalue <0.05),]
+```
+#Other x Mixed 
+```{r}
+
+df.OM.stats <- subset(df, diagnosis %in% c("Mixed dementia (AD and vascular dementia)", "Other non-AD Dementias"))
+
+df.OM.stats <- as.data.frame(sapply(df.OM.stats[,grep("_bin", names(df.OM.stats),value = T)], function(x) t.test(x ~ df.OM.stats$diagnosis)$p.value)) 
+names(df.OM.stats) <- "p_value"
+setDT(df.OM.stats, keep.rownames = "ROI")
+head(df.OM.stats, 168)
+
+# #FDR correction
+df.OM.stats <- cbind(df.OM.stats, p.adjust(df.OM.stats$p_value), method = "fdr")
+names(df.OM.stats)[3] <- "FDR.pvalue"
+head(df.OM.stats)
+# 
+# #ROIs that are significant after FDR correction. There are `r length(which(df.stats$FDR.pvalue <0.05))` corrected ROIs that remain significant.
+df.OM.stats[which(df.OM.stats$FDR.pvalue <0.05),]
+df_OM_to_edit <- df.OM.stats[which(df.OM.stats$FDR.pvalue <0.05),]
+
+```
+#----------------------------------------------
+# 6.	Hamming distances – how different are people from others within the same group?
+#----------------------------------------------
+X is ROI and Y is subject.
+## - AD
+```{r fig.width=12}
+
+## using binerised z -scores
+AD_bin.mat <- as.matrix(df %>% filter(diagnosis == "AD") %>%
+  select(contains("_bin")))
+## using binerised z -scores
+MCI_bin.mat <- as.matrix(df %>% filter(diagnosis == "MCI") %>%
+  select(contains("_bin")))
+## using binerised z -scores
+FTD_bin.mat <- as.matrix(df %>% filter(diagnosis == "Frontotemporal dementia") %>%
+  select(contains("_bin")))
+ 
+## using binerised z -scores
+Mixeddementia_bin.mat <- as.matrix(df %>% filter(diagnosis == "Mixed dementia (AD and vascular dementia)") %>%
+  select(contains("_bin")))
+## using binerised z -scores
+OthernonADdem_bin.mat <- as.matrix(df %>% filter(diagnosis == "Other non-AD Dementias") %>%
+  select(contains("_bin")))
+```
+## AD
+```{r}
+## AD
+mean(hamming.distance(AD_bin.mat))
+median(hamming.distance(AD_bin.mat))
+sd(hamming.distance(AD_bin.mat))
+```
+## MCI
+```{r}
+## MCI
+mean(hamming.distance(MCI_bin.mat))
+median(hamming.distance(MCI_bin.mat))
+sd(hamming.distance(MCI_bin.mat))
+```
+## FTD
+```{r}
+## FTD
+mean(hamming.distance(FTD_bin.mat))
+median(hamming.distance(FTD_bin.mat))
+sd(hamming.distance(FTD_bin.mat))
+```
+## Mixed dementia (AD and vascular dementia)
+OthernonADdem_bin.mat
+```{r}
+## Mixed dementia (AD and vascular dementia)
+mean(hamming.distance(Mixeddementia_bin.mat))
+median(hamming.distance(Mixeddementia_bin.mat))
+sd(hamming.distance(Mixeddementia_bin.mat))
+```
+## Other non-AD dementias
+```{r}
+## Other non-AD dementias
+mean(hamming.distance(OthernonADdem_bin.mat))
+median(hamming.distance(OthernonADdem_bin.mat))
+sd(hamming.distance(OthernonADdem_bin.mat))
+```
+
+
+
+# Distance matrix
+Each cell is the Hamming distance between the binary (see above) vectors of each subject, based on pairwise comparisons.
+## - AD distances
+```{r fig.width=12}
+#hamming distance
+AD_hamming <- hamming.distance(AD_bin.mat)
+
+# prepare plot
+AD_hamming <- as.data.frame(AD_hamming) ##create df
+AD_hamming_plot <- tibble::rownames_to_column(AD_hamming, "VALUE") ##prepare to reshape
+AD_hamming_plot <- reshape2::melt(AD_hamming_plot) ##reshape
+
+AD_hamming_plot$value[AD_hamming_plot$value == 0] <- NA ##change 0 to NA to prepare recolouring as white
+
+AD_hamming_plot$VALUE <- factor(AD_hamming_plot$VALUE,order(AD_hamming_plot$variable)) ##order axis
+
+#plot 168 regions - change depending number of regions you have!
+ggplot(AD_hamming_plot, aes(VALUE, variable, fill= value)) +
+  geom_tile() +
+  scale_fill_viridis(option="plasma", na.value = "white", limits = c(1, 169)) +
+ coord_equal() 
+
+
+# Original code
+AD_hamming <- hamming.distance(AD_bin.mat)
+AD_hamming <- as.data.frame(AD_hamming) ##create df
+AD_hamming_plot <- tibble::rownames_to_column(AD_hamming, "VALUE") ##prepare to reshape
+AD_hamming_plot <- reshape2::melt(AD_hamming_plot) ##reshape
+AD_hamming_plot$value[AD_hamming_plot$value == 0] <- NA ##change 0 to NA to prepare recolouring as white
+AD_hamming_plot$VALUE <- factor(AD_hamming_plot$VALUE, levels = order(AD_hamming_plot$variable))
+# Define the number of regions
+num_regions <- 168  # Change this number according to your actual data
+
+# Create breaks including the end number
+x_breaks <- c(seq(0, num_regions, by = 20), num_regions)
+y_breaks <- c(seq(0, num_regions, by = 20), num_regions)
+
+# Plot 168 regions - change depending number of regions you have!
+AD1 <- ggplot(AD_hamming_plot, aes(VALUE, variable, fill = value)) +
+  geom_tile() +
+  scale_fill_viridis(option = "plasma", na.value = "white", limits = c(1, 169)) +
+  scale_x_discrete(breaks = levels(AD_hamming_plot$VALUE)[x_breaks]) +
+  scale_y_discrete(breaks = levels(AD_hamming_plot$variable)[y_breaks], labels = function(x) sub("V", "", x)) +
+  coord_equal() +
+  ggtitle("AD") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, family = "Arial"), 
+    text = element_text(family = "Arial", color = "black"),
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 10, family = "Arial", color = "black"),
+    axis.text.y = element_text(size = 10, family = "Arial", color = "black"),
+    axis.title.x = element_text(size = 12, margin = margin(t = 10), family = "Arial", color = "black"),
+    axis.title.y = element_text(size = 12, margin = margin(r = 10), family = "Arial", color = "black"),
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 2),
+    axis.line = element_line(color = "black", size = 2),
+    axis.ticks = element_line(color = "black", size = 2),
+    axis.ticks.length = unit(5, "pt")  # Length of the ticks
+  ) +
+  labs(title = "AD", x = "", y = "")
+
+print(AD1)
+```
+## - MCI distances
+```{r fig.width=12}
+#hamming distance
+MCI_hamming <- hamming.distance(MCI_bin.mat)
+
+# prepare plot
+MCI_hamming <- as.data.frame(MCI_hamming) ##create df
+MCI_hamming_plot <- tibble::rownames_to_column(MCI_hamming, "VALUE") ##prepare to reshape
+MCI_hamming_plot <- reshape2::melt(MCI_hamming_plot) ##reshape
+
+MCI_hamming_plot$value[MCI_hamming_plot$value == 0] <- NA ##change 0 to NA to prepare recolouring as white
+
+MCI_hamming_plot$VALUE <- factor(MCI_hamming_plot$VALUE,order(MCI_hamming_plot$variable)) ##order axis
+
+#plot 168 regions  - change depending number of regions you have!
+ggplot(MCI_hamming_plot, aes(VALUE, variable, fill= value)) +
+  geom_tile() +
+  scale_fill_viridis(option="plasma", na.value = "white", limits = c(1, 168)) +
+ coord_equal() 
+
+
+# Assuming MCI_bin.mat is the binary matrix for MCI
+MCI_hamming <- hamming.distance(MCI_bin.mat)
+MCI_hamming <- as.data.frame(MCI_hamming) ##create df
+MCI_hamming_plot <- tibble::rownames_to_column(MCI_hamming, "VALUE") ##prepare to reshape
+MCI_hamming_plot <- reshape2::melt(MCI_hamming_plot) ##reshape
+MCI_hamming_plot$value[MCI_hamming_plot$value == 0] <- NA ##change 0 to NA to prepare recolouring as white
+MCI_hamming_plot$VALUE <- factor(MCI_hamming_plot$VALUE, levels = order(MCI_hamming_plot$variable))
+# Define the number of regions
+num_regions <- 168  # Change this number according to your actual data
+
+# Create breaks including the end number
+x_breaks <- c(seq(0, num_regions, by = 10), num_regions)
+y_breaks <- c(seq(0, num_regions, by = 10), num_regions)
+
+# Plot 168 regions - change depending number of regions you have!
+MCI <- ggplot(MCI_hamming_plot, aes(VALUE, variable, fill = value)) +
+  geom_tile() +
+  scale_fill_viridis(option = "plasma", na.value = "white", limits = c(1, 169)) +
+  scale_x_discrete(breaks = levels(MCI_hamming_plot$VALUE)[x_breaks]) +
+  scale_y_discrete(breaks = levels(MCI_hamming_plot$variable)[y_breaks], labels = function(x) sub("V", "", x)) +
+  coord_equal() +
+  ggtitle("MCI") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, family = "Arial"), 
+    text = element_text(family = "Arial", color = "black"),
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 10, family = "Arial", color = "black"),
+    axis.text.y = element_text(size = 10, family = "Arial", color = "black"),
+    axis.title.x = element_text(size = 12, margin = margin(t = 10), family = "Arial", color = "black"),
+    axis.title.y = element_text(size = 12, margin = margin(r = 10), family = "Arial", color = "black"),
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 2),
+    axis.line = element_line(color = "black", size = 2),
+    axis.ticks = element_line(color = "black", size = 2),
+    axis.ticks.length = unit(5, "pt")  # Length of the ticks
+  ) +
+  labs(title = "MCI", x = "", y = "")
+
+print(MCI)
+
+```
+## - FTD distances
+```{r fig.width=12}
+#hamming distance
+FTD_hamming <- hamming.distance(FTD_bin.mat)
+
+# prepare plot
+FTD_hamming <- as.data.frame(FTD_hamming) ##create df
+FTD_hamming_plot <- tibble::rownames_to_column(FTD_hamming, "VALUE") ##prepare to reshape
+FTD_hamming_plot <- reshape2::melt(FTD_hamming_plot) ##reshape
+
+FTD_hamming_plot$value[FTD_hamming_plot$value == 0] <- NA ##change 0 to NA to prepare recolouring as white
+
+FTD_hamming_plot$VALUE <- factor(FTD_hamming_plot$VALUE,order(FTD_hamming_plot$variable)) ##order axis
+
+#plot 168 regions - change depending number of regions you have!
+ggplot(FTD_hamming_plot, aes(VALUE, variable, fill= value)) +
+  geom_tile() +
+  scale_fill_viridis(option="plasma", na.value = "white", limits = c(1, 168)) +
+ coord_equal()
+
+# Assuming FTD_bin.mat is the binary matrix for FTD
+FTD_hamming <- hamming.distance(FTD_bin.mat)
+FTD_hamming <- as.data.frame(FTD_hamming) ##create df
+FTD_hamming_plot <- tibble::rownames_to_column(FTD_hamming, "VALUE") ##prepare to reshape
+FTD_hamming_plot <- reshape2::melt(FTD_hamming_plot) ##reshape
+FTD_hamming_plot$value[FTD_hamming_plot$value == 0] <- NA ##change 0 to NA to prepare recolouring as white
+FTD_hamming_plot$VALUE <- factor(FTD_hamming_plot$VALUE, levels = order(FTD_hamming_plot$variable))
+
+# Define the number of regions
+num_regions <- 168  # Change this number according to your actual data
+
+# Create breaks including the end number
+x_breaks <- c(seq(0, num_regions, by = 5), num_regions)
+y_breaks <- c(seq(0, num_regions, by = 5), num_regions)
+
+# Plot 168 regions - change depending number of regions you have!
+FTD <- ggplot(FTD_hamming_plot, aes(VALUE, variable, fill = value)) +
+  geom_tile() +
+  scale_fill_viridis(option = "plasma", na.value = "white", limits = c(1, 169)) +
+  scale_x_discrete(breaks = levels(FTD_hamming_plot$VALUE)[x_breaks]) +
+  scale_y_discrete(breaks = levels(FTD_hamming_plot$variable)[y_breaks], labels = function(x) sub("V", "", x)) +
+  coord_equal() +
+  ggtitle("FTD") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, family = "Arial"), 
+    text = element_text(family = "Arial", color = "black"),
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 10, family = "Arial", color = "black"),
+    axis.text.y = element_text(size = 10, family = "Arial", color = "black"),
+    axis.title.x = element_text(size = 12, margin = margin(t = 10), family = "Arial", color = "black"),
+    axis.title.y = element_text(size = 12, margin = margin(r = 10), family = "Arial", color = "black"),
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 2),
+    axis.line = element_line(color = "black", size = 2),
+    axis.ticks = element_line(color = "black", size = 2),
+    axis.ticks.length = unit(5, "pt")  # Length of the ticks
+  ) +
+  labs(title = "FTD", x = "", y = "")
+
+print(FTD)
+```
+## - Mixed dementia distances
+```{r}
+Mixeddementia_hamming <- hamming.distance(Mixeddementia_bin.mat)
+
+# prepare plot
+Mixeddementia_hamming <- as.data.frame(Mixeddementia_hamming) ##create df
+Mixeddementia_hamming_plot <- tibble::rownames_to_column(Mixeddementia_hamming, "VALUE") ##prepare to reshape
+Mixeddementia_hamming_plot <- reshape2::melt(Mixeddementia_hamming_plot) ##reshape
+
+Mixeddementia_hamming_plot$value[Mixeddementia_hamming_plot$value == 0] <- NA ##change 0 to NA to prepare recolouring as white
+
+Mixeddementia_hamming_plot$VALUE <- factor(Mixeddementia_hamming_plot$VALUE,order(Mixeddementia_hamming_plot$variable)) ##order axis
+
+#plot 168 regions - change depending number of regions you have!
+ggplot(Mixeddementia_hamming_plot, aes(VALUE, variable, fill= value)) +
+  geom_tile() +
+  scale_fill_viridis(option="plasma", na.value = "white", limits = c(1, 168)) +
+ coord_equal()
+
+# Assuming Mixeddementia_bin.mat is the binary matrix for Mixeddementia
+Mixeddementia_hamming <- hamming.distance(Mixeddementia_bin.mat)
+Mixeddementia_hamming <- as.data.frame(Mixeddementia_hamming) ##create df
+Mixeddementia_hamming_plot <- tibble::rownames_to_column(Mixeddementia_hamming, "VALUE") ##prepare to reshape
+Mixeddementia_hamming_plot <- reshape2::melt(Mixeddementia_hamming_plot) ##reshape
+Mixeddementia_hamming_plot$value[Mixeddementia_hamming_plot$value == 0] <- NA ##change 0 to NA to prepare recolouring as white
+Mixeddementia_hamming_plot$VALUE <- factor(Mixeddementia_hamming_plot$VALUE, levels = order(Mixeddementia_hamming_plot$variable))
+
+# Define the number of regions
+num_regions <- 168  # Change this number according to your actual data
+
+# Create breaks including the end number
+x_breaks <- c(seq(0, num_regions, by = 5), num_regions)
+y_breaks <- c(seq(0, num_regions, by = 5), num_regions)
+
+# Plot 168 regions - change depending number of regions you have!
+Mixed_dementia <- ggplot(Mixeddementia_hamming_plot, aes(VALUE, variable, fill = value)) +
+  geom_tile() +
+  scale_fill_viridis(option = "plasma", na.value = "white", limits = c(1, 169)) +
+  scale_x_discrete(breaks = levels(Mixeddementia_hamming_plot$VALUE)[x_breaks]) +
+  scale_y_discrete(breaks = levels(Mixeddementia_hamming_plot$variable)[y_breaks], labels = function(x) sub("V", "", x)) +
+  coord_equal() +
+  ggtitle("Mixeddementia") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, family = "Arial"), 
+    text = element_text(family = "Arial", color = "black"),
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 10, family = "Arial", color = "black"),
+    axis.text.y = element_text(size = 10, family = "Arial", color = "black"),
+    axis.title.x = element_text(size = 12, margin = margin(t = 10), family = "Arial", color = "black"),
+    axis.title.y = element_text(size = 12, margin = margin(r = 10), family = "Arial", color = "black"),
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 2),
+    axis.line = element_line(color = "black", size = 2),
+    axis.ticks = element_line(color = "black", size = 2),
+    axis.ticks.length = unit(5, "pt")  # Length of the ticks
+  ) +
+  labs(title = "Mixed dementia", x = "", y = "")
+
+print(Mixed_dementia)
+
+```
+#Other dementia distances
+```{r}
+OthernonADdem_hamming <- hamming.distance(OthernonADdem_bin.mat)
+
+# prepare plot
+OthernonADdem_hamming <- as.data.frame(OthernonADdem_hamming) ##create df
+OthernonADdem_hamming_plot <- tibble::rownames_to_column(OthernonADdem_hamming, "VALUE") ##prepare to reshape
+OthernonADdem_hamming_plot <- reshape2::melt(OthernonADdem_hamming_plot) ##reshape
+
+OthernonADdem_hamming_plot$value[OthernonADdem_hamming_plot$value == 0] <- NA ##change 0 to NA to prepare recolouring as white
+
+OthernonADdem_hamming_plot$VALUE <- factor(OthernonADdem_hamming_plot$VALUE,order(OthernonADdem_hamming_plot$variable)) ##order axis
+
+#plot 168 regions - change depending number of regions you have!
+ggplot(OthernonADdem_hamming_plot, aes(VALUE, variable, fill= value)) +
+  geom_tile() +
+  scale_fill_viridis(option="plasma", na.value = "white", limits = c(1, 168)) +
+ coord_equal()
+
+# Assuming OthernonADdem_bin.mat is the binary matrix for OthernonADdem
+OthernonADdem_hamming <- hamming.distance(OthernonADdem_bin.mat)
+OthernonADdem_hamming <- as.data.frame(OthernonADdem_hamming) ##create df
+OthernonADdem_hamming_plot <- tibble::rownames_to_column(OthernonADdem_hamming, "VALUE") ##prepare to reshape
+OthernonADdem_hamming_plot <- reshape2::melt(OthernonADdem_hamming_plot) ##reshape
+OthernonADdem_hamming_plot$value[OthernonADdem_hamming_plot$value == 0] <- NA ##change 0 to NA to prepare recolouring as white
+OthernonADdem_hamming_plot$VALUE <- factor(OthernonADdem_hamming_plot$VALUE, levels = order(OthernonADdem_hamming_plot$variable))
+
+# Define the number of regions
+num_regions <- 168  # Change this number according to your actual data
+
+# Create breaks including the end number
+x_breaks <- c(seq(0, num_regions, by = 5), num_regions)
+y_breaks <- c(seq(0, num_regions, by = 5), num_regions)
+
+# Plot 168 regions - change depending number of regions you have!
+Others <- ggplot(OthernonADdem_hamming_plot, aes(VALUE, variable, fill = value)) +
+  geom_tile() +
+  scale_fill_viridis(option = "plasma", na.value = "white", limits = c(1, 169)) +
+  scale_x_discrete(breaks = levels(OthernonADdem_hamming_plot$VALUE)[x_breaks]) +
+  scale_y_discrete(breaks = levels(OthernonADdem_hamming_plot$variable)[y_breaks], labels = function(x) sub("V", "", x)) +
+  coord_equal() +
+  ggtitle("OthernonADdem") +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 16, family = "Arial"), 
+    text = element_text(family = "Arial", color = "black"),
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 10, family = "Arial", color = "black"),
+    axis.text.y = element_text(size = 10, family = "Arial", color = "black"),
+    axis.title.x = element_text(size = 12, margin = margin(t = 10), family = "Arial", color = "black"),
+    axis.title.y = element_text(size = 12, margin = margin(r = 10), family = "Arial", color = "black"),
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 2),
+    axis.line = element_line(color = "black", size = 2),
+    axis.ticks = element_line(color = "black", size = 2),
+    axis.ticks.length = unit(5, "pt")  # Length of the ticks
+  ) +
+  labs(title = "Other dementias", x = "", y = "")
+
+print(Others)
+
+```
+
+```{r}
+
+# Create the plot grid
+Hamming_final <- plot_grid(AD1, MCI, FTD, Mixed_dementia, Others, nrow = 2, labels = NULL)
+
+# Add the title to the plot grid
+Hamming_final_with_title <- ggdraw() +
+  draw_label("Hamming distance matrices", fontface = 'bold', x = 0.5, y = 0.99, hjust = 0.5, size = 18) +
+  draw_plot(Hamming_final, y = -0.05, height = 1)
+
+# Display the final plot
+print(Hamming_final_with_title)
+```
+
+# Stats - Hamming Dissimilarity - subject medians (median of each column)
+## AD
+```{r paged.print=FALSE}
+AD_hamming <- as.data.frame(AD_hamming) #change format
+
+#work out medians
+M_AD_hamming <- 
+  AD_hamming %>%
+  summarise(across(V1:149, ~ median(.x, na.rm = TRUE))) ##this needs to be changed to fit how many n's (e.g.controls) you have 
+            
+V1check <- median(AD_hamming$V1) #check if calculated medians okay
+
+# create df of medians
+M_AD_hamming <-gather(M_AD_hamming)
+M_AD_hamming$key <-  c("AD")
+M_AD_hamming <-M_AD_hamming %>% dplyr::rename(diagnosis= key) #rename col
+M_AD_hamming <-M_AD_hamming %>% dplyr::rename(Hamming_median= value) #rename col
+```
+# MCI
+```{r paged.print=FALSE}
+MCI_hamming <- as.data.frame(MCI_hamming) #change format
+
+#work out medians
+M_MCI_hamming <- 
+  MCI_hamming %>%
+  summarise(across(V1:67, ~ median(.x, na.rm = TRUE))) ##this needs to be changed to fit how many n's you have 
+            
+V1check <- median(MCI_hamming$V1) #check if calculated medians okay
+
+# create df of medians
+M_MCI_hamming <-gather(M_MCI_hamming)
+M_MCI_hamming$key <-  c("MCI")
+M_MCI_hamming <-M_MCI_hamming %>% dplyr::rename(diagnosis= key) #rename col
+M_MCI_hamming <-M_MCI_hamming %>% dplyr::rename(Hamming_median= value) #rename col
+```
+# FTD
+```{r paged.print=FALSE}
+FTD_hamming <- as.data.frame(FTD_hamming) #change format
+
+#work out medians
+M_FTD_hamming <- 
+  FTD_hamming %>%
+  summarise(across(V1:17, ~ median(.x, na.rm = TRUE))) ##this needs to be changed to fit how many n's you have in that group
+            
+V1check <- median(FTD_hamming$V1) #check if calculated medians okay
+
+# create df of medians
+M_FTD_hamming <-gather(M_FTD_hamming)
+M_FTD_hamming$key <-  c("FTD")
+M_FTD_hamming <-M_FTD_hamming %>% dplyr::rename(diagnosis= key) #rename col
+M_FTD_hamming <-M_FTD_hamming %>% dplyr::rename(Hamming_median= value) #rename col
+```
+# Mixeddementia_hamming
+```{r}
+Mixeddementia_hamming <- as.data.frame(Mixeddementia_hamming) #change format
+
+#work out medians
+M_Mixeddementia_hamming <- 
+  Mixeddementia_hamming %>%
+  summarise(across(V1:27, ~ median(.x, na.rm = TRUE))) ##this needs to be changed to fit how many n's you have in that group
+            
+V1check <- median(Mixeddementia_hamming$V1) #check if calculated medians okay
+
+# create df of medians
+M_Mixeddementia_hamming <-gather(M_Mixeddementia_hamming)
+M_Mixeddementia_hamming$key <-  c("Mixeddementia")
+M_Mixeddementia_hamming <-M_Mixeddementia_hamming %>% dplyr::rename(diagnosis= key) #rename col
+M_Mixeddementia_hamming <-M_Mixeddementia_hamming %>% dplyr::rename(Hamming_median= value) #rename col
+```
+#OthernonADdem_hamming
+```{r}
+OthernonADdem_hamming <- as.data.frame(OthernonADdem_hamming) #change format
+
+#work out medians
+M_OthernonADdem_hamming <- 
+  OthernonADdem_hamming %>%
+  summarise(across(V1:25, ~ median(.x, na.rm = TRUE))) ##this needs to be changed to fit how many n's you have in that group
+            
+V1check <- median(OthernonADdem_hamming$V1) #check if calculated medians okay
+
+# create df of medians
+M_OthernonADdem_hamming <-gather(M_OthernonADdem_hamming)
+M_OthernonADdem_hamming$key <-  c("OthernonADdementia")
+M_OthernonADdem_hamming <-M_OthernonADdem_hamming %>% dplyr::rename(diagnosis= key) #rename col
+M_OthernonADdem_hamming <-M_OthernonADdem_hamming %>% dplyr::rename(Hamming_median= value) #rename col
+
+```
+
+## create a seperate df
+```{r paged.print=FALSE}
+subject_medians <- rbind(M_AD_hamming, M_MCI_hamming)
+subject_medians <- rbind(subject_medians, M_FTD_hamming)
+subject_medians <- rbind(subject_medians, M_Mixeddementia_hamming)
+subject_medians <- rbind(subject_medians, M_OthernonADdem_hamming)
+```
+# - Hamming subject median summary
+```{r paged.print=FALSE}
+def <- describeBy(subject_medians$Hamming_median, subject_medians$diagnosis, IQR = T)
+print(def)
+```
+
+# - Hamming subject median linear regression 
+```{r}
+library(robustbase)
+#All diagnoses are highly significant to explain the 
+full_model <- lmrob(Hamming_median ~ diagnosis, data = subject_medians)
+summary(full_model)
+control_model <- lmrob(Hamming_median ~ 1, data = subject_medians)
+summary(control_model)
+anova(control_model,full_model)
+s5 <- lmrob(Hamming_median ~ diagnosis, data = subject_medians)
+confint(s5)
+rm(s5)
+
+#FDR correction
+coeff_table <- summary(full_model)$coefficients
+p_values_full_model <- data.frame(
+  Coefficients = rownames(coeff_table),
+  Original_P_Values = coeff_table[, "Pr(>|t|)"],
+  FDR_Adjusted_P_Values = p.adjust(coeff_table[, "Pr(>|t|)"], method = "fdr")
+)
+# Print the p-values table
+print(p_values_full_model)
+
+## Perform pairwise Mann-Whitney tests
+pairwise_comparisons_fdr <- pairwise.wilcox.test(subject_medians$Hamming_median, subject_medians$diagnosis, p.adjust.method = "fdr")
+print(pairwise_comparisons_fdr)
+#significant results MCI vs AD, FTD vs AD, Other non-AD dem vs A post FDR correct - suggesting differences between dementia? 
+```
+#Create a density plot for the Hamming medians
+```{r}
+subject_medians1 <- subject_medians
+subject_medians1$diagnosis <- gsub("Mixeddementia", "Mixed Dementia", subject_medians1$diagnosis)
+subject_medians1$diagnosis <- gsub("OthernonADdementia", "Other dementias", subject_medians1$diagnosis)
+
+# Create the density plot for tOC by diagnosis
+Hamming_medians <- ggplot(subject_medians1, aes(x = Hamming_median, color = diagnosis, fill = diagnosis)) +
+  geom_density(alpha = 0.3) +
+  labs(
+    title = "Hamming medians dissimilarity",
+    x = "Hamming medians",
+    y = "Density",
+    color = "Diagnosis",  # Set legend title for color
+    fill = "Diagnosis"    # Set legend title for fill
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16),
+    axis.title.x = element_text(size = 14),  # Increase x-axis title size by 1
+    axis.title.y = element_text(size = 14),  # Increase y-axis title size by 1
+    axis.line = element_line(color = "black"),  # Add black line to the axis
+    panel.grid.major = element_blank(),  # Remove major grid lines
+    panel.grid.minor = element_blank(),  # Remove minor grid lines
+    panel.background = element_blank(),  # Remove panel background
+    axis.text = element_text(color = "black"),  # Set axis text color to black
+    axis.ticks = element_line(color = "black"),  # Set axis ticks color to black
+    legend.title = element_text(size = 11),  # Increase legend title size by 1
+    legend.text = element_text(size = 11)  # Increase legend text size by 1
+  ) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10), expand = c(0, 0)) +
+  scale_y_continuous(breaks = scales::pretty_breaks(n = 10), expand = c(0, 0))
+
+# Display the plot
+print(Hamming_medians)
+
+# Remove the data frame from the environment
+rm(subject_medians1)
+
+
+# Create the plot grid
+Hamming_final <- plot_grid(AD1, MCI, FTD, Mixed_dementia, Others, nrow = 2, labels = NULL)
+
+# Create the Hamming_final plot
+Hamming_final <- ggdraw() +
+  draw_label("Hamming distance matrices", x = 0.055, y = 0.98, size = 16, hjust = 0.05, fontfamily = "Arial") +
+  draw_plot(plot = Hamming_final, y = -0.05, height = 1) +
+  theme(
+    plot.title = element_text(size = 16)
+  )
+
+# Print the plot
+print(Hamming_final)
+
+Hamming_distance_final <- plot_grid(Hamming_final, Hamming_medians, nrow = 2, labels = "AUTO")
+print(Hamming_distance_final)
+```
+#----------------------------------------------
+# - - - 7. DIAGNOSIS - Proportion maps - - - 
+#----------------------------------------------
+
+#----------------------------------------------
+# - - - REGIONAL cortical thickness for diagnosis - - - 
+#----------------------------------------------
+## everyone at all timepoints, this can be fine for cross sectional data only 
+```{r}
+# For CT only remove SV columns  - need to check as manually selecting columns here. Alt way could grep 
+df_ct <- df[, -c(183:202)]
+
+# find out length to work out % of outliers in group
+n <- length(unique(df_ct$RID))
+
+AB <- as.data.frame(sapply(X = df_ct[,grep("_bin", names(df_ct),value = T)], FUN = function(x) sum(with(df_ct,x))))
+colnames(AB)[1] <- "count_AB"
+AB$proportion_AB <- AB$count/n
+AB <- dplyr::as_tibble(AB, rownames = "ROI")
+AB <- AB %>% filter(!(ROI %in% c("Ethnicity_bin", "Years.of.education_bin")))
+```
+
+## everyone seperated by timepoint (here can can change 'timepoint' for 'diagnosis' or any other catagorical variable you are interested in)
+```{r}
+# subset into timepoint groups
+A <- df_ct %>% filter(diagnosis == "AD") 
+B <- df_ct %>% filter(diagnosis == "MCI") 
+C <- df_ct %>% filter(diagnosis == "Frontotemporal dementia") 
+D <- df_ct %>% filter(diagnosis == "Mixed dementia (AD and vascular dementia)") 
+E <- df_ct %>% filter(diagnosis == "Other non-AD Dementias") 
+
+# find out length to work out % of outliers in group
+nA <- length(unique(A$RID))
+nB <- length(unique(B$RID))
+nC <- length(unique(C$RID))
+nD <- length(unique(D$RID))
+nE <- length(unique(E$RID))
+
+#AD
+A <- as.data.frame(sapply(X = A[,grep("_bin", names(df_ct),value = T)], FUN = function(x) sum(with(A,x))))
+colnames(A)[1] <- "count_A"
+A$proportion_A <- A$count/nA
+A <- dplyr::as_tibble(A, rownames = "ROI")
+
+#MCI
+B <- as.data.frame(sapply(X = B[,grep("_bin", names(df_ct),value = T)], FUN = function(x) sum(with(B,x))))
+colnames(B)[1] <- "count_B"
+B$proportion_B <- B$count/nB
+B <- dplyr::as_tibble(B, rownames = "ROI")
+
+#FTD
+C <- as.data.frame(sapply(X = C[,grep("_bin", names(df_ct),value = T)], FUN = function(x) sum(with(C,x))))
+colnames(C)[1] <- "count_C"
+C$proportion_C <- C$count/nC
+C <- dplyr::as_tibble(C, rownames = "ROI")
+
+#Mixed dementia
+D <- as.data.frame(sapply(X = D[,grep("_bin", names(df_ct),value = T)], FUN = function(x) sum(with(D,x))))
+colnames(D)[1] <- "count_D"
+D$proportion_D <- D$count/nD
+D <- dplyr::as_tibble(D, rownames = "ROI")
+
+#Other non-AD dementias
+E <- as.data.frame(sapply(X = E[,grep("_bin", names(df_ct),value = T)], FUN = function(x) sum(with(E,x))))
+colnames(E)[1] <- "count_E"
+E$proportion_E <- E$count/nE
+E <- dplyr::as_tibble(E, rownames = "ROI")
+
+# make proportions into one df
+df.outliers <- merge(A ,B, by="ROI", all.x = TRUE, all.y = TRUE)
+df.outliers <- merge(df.outliers ,C, by="ROI", all.x = TRUE, all.y = TRUE)
+df.outliers <- merge(df.outliers ,D, by="ROI", all.x = TRUE, all.y = TRUE)
+df.outliers <- merge(df.outliers ,E, by="ROI", all.x = TRUE, all.y = TRUE)
+# format for ggseg
+df.outliers_t1_2 <- df.outliers[,-1]
+rownames(df.outliers_t1_2) <- df.outliers[,1]
+df.outliers_t1_2 <- df.outliers_t1_2 %>% mutate(hemi = ifelse(str_detect(row.names(df.outliers_t1_2), "^l"), "left", "right"))
+df.outliers <- tibble::rownames_to_column(df.outliers_t1_2, "ROI")
+rm(df.outliers_t1_2)
+df.outliers <- df.outliers %>%
+  filter(!(ROI %in% c("Ethnicity_bin", "Years.of.education_bin")))
+```
+
+#Convert existing data to desterieux atlas
+```{r}
+data(desterieux)
+
+left.df.outliers_t <- df.outliers %>%
+  filter(str_detect(ROI, "lh"))
+x <- gsub("lh_", "", left.df.outliers_t$ROI)
+y <- gsub("G.S_", "G and S ", x)
+z <- gsub("G_", "G ", y)
+z1 <- gsub("S_", "S ", z)
+z2 <- gsub("_", " ", z1)
+z3 <- gsub(" bin", "", z2)
+z4 <- gsub("\\.", " ", z3)
+z5 <- gsub("cingul ", "cingul-", z4)
+z6 <- gsub("Mid ", "Mid-", z5)
+z7 <- gsub("Post ", "Post", z6)
+z8 <- gsub("inf ", "inf-", z7)
+z9 <- gsub("med ", "med-", z8)
+z10 <- gsub("sup ", "sup-", z9)
+z11 <- gsub("Fis ant ", "Fis-ant-", z10)
+z12 <- gsub("precentral ", "precentral-", z11)
+z13 <- gsub("Fis pos ", "Fis-pos-", z12)
+z14 <- gsub("lg S", "lg and S", z13)
+z15 <- gsub("oc temp", "oc-temp", z14)
+z16 <- gsub("sup and transversal", "sup-transversal", z15)
+z17 <- gsub("orbital H Shaped", "orbital-H Shaped", z16)
+z18 <- gsub("oc sup-transversal", "oc sup and transversal", z17)
+z19 <- gsub("prim Jensen", "prim-Jensen", z18)
+z20 <- gsub("S oc-temp med-Lingual", "S oc-temp med and Lingual", z19)
+z21 <- gsub("lat fusifor", "lat-fusifor", z20)
+z22 <- gsub("middle Lunatus", "middle and Lunatus", z21)
+z23 <- gsub("intrapariet P trans", "intrapariet and P trans", z22)
+z24 <- gsub("thickness", "", z23)
+z25 <- gsub("sup- ", "sup", z24)
+z26 <- gsub("inf- ", "inf", z25)
+z27 <- gsub("Postdorsal", "Post-dorsal", z26)
+z28 <- gsub("Postventral", "Post-ventral", z27)
+z29 <- gsub("G precentral-", "G precentral", z28)
+renamed_ROIs <- gsub("Lat Fis post", "Lat Fis-post", z29)
+renamed_ROIs <- as.data.frame(renamed_ROIs)
+
+renamed_ROIs <- str_trim(renamed_ROIs$renamed_ROIs, side = c("right"))
+desterieux <- as.data.frame(desterieux)
+desterieux_ROIs <- as.data.frame(desterieux %>% filter(hemi == "left"))$region
+compare_lists <- cbind(sort(renamed_ROIs), sort(unique(desterieux_ROIs)))
+list_matches <- compare_lists[,1] %in% compare_lists[,2]
+list_matches <- as.data.frame(compare_lists[,1] %in% compare_lists[,2])
+#
+compare_lists[!list_matches,]
+## if no mismatches, than add to data.frame as region
+
+left.df.outliers_t$region <- renamed_ROIs
+
+right.df.outliers_t <- df.outliers %>%
+  filter(str_detect(ROI, "rh_"))
+x <- gsub("rh_", "", right.df.outliers_t$ROI)
+y <- gsub("G.S_", "G and S ", x)
+z <- gsub("G_", "G ", y)
+z1 <- gsub("S_", "S ", z)
+z2 <- gsub("_", " ", z1)
+z3 <- gsub(" bin", "", z2)
+z4 <- gsub("\\.", " ", z3)
+z5 <- gsub("cingul ", "cingul-", z4)
+z6 <- gsub("Mid ", "Mid-", z5)
+z7 <- gsub("Post ", "Post", z6)
+z8 <- gsub("inf ", "inf-", z7)
+z9 <- gsub("med ", "med-", z8)
+z10 <- gsub("sup ", "sup-", z9)
+z11 <- gsub("Fis ant ", "Fis-ant-", z10)
+z12 <- gsub("precentral ", "precentral-", z11)
+z13 <- gsub("Fis pos ", "Fis-pos-", z12)
+z14 <- gsub("lg S", "lg and S", z13)
+z15 <- gsub("oc temp", "oc-temp", z14)
+z16 <- gsub("sup and transversal", "sup-transversal", z15)
+z17 <- gsub("orbital H Shaped", "orbital-H Shaped", z16)
+z18 <- gsub("oc sup-transversal", "oc sup and transversal", z17)
+z19 <- gsub("prim Jensen", "prim-Jensen", z18)
+z20 <- gsub("S oc-temp med-Lingual", "S oc-temp med and Lingual", z19)
+z21 <- gsub("lat fusifor", "lat-fusifor", z20)
+z22 <- gsub("middle Lunatus", "middle and Lunatus", z21)
+z23 <- gsub("intrapariet P trans", "intrapariet and P trans", z22)
+z24 <- gsub("thickness", "", z23)
+z25 <- gsub("sup- ", "sup", z24)
+z26 <- gsub("inf- ", "inf", z25)
+z27 <- gsub("Postdorsal", "Post-dorsal", z26)
+z28 <- gsub("Postventral", "Post-ventral", z27)
+z29 <- gsub("G precentral-", "G precentral", z28)
+renamed_ROIs <- gsub("Lat Fis post", "Lat Fis-post", z29)
+renamed_ROIs <- as.data.frame(renamed_ROIs)
+
+renamed_ROIs <- str_trim(renamed_ROIs$renamed_ROIs, side = c("right"))
+
+desterieux_ROIs <- as.data.frame(desterieux %>% filter(hemi == "right"))$region
+
+compare_lists <- cbind(sort(renamed_ROIs), sort(unique(desterieux_ROIs)))
+list_matches <- compare_lists[,1] %in% compare_lists[,2]
+compare_lists[!list_matches,]
+
+## if no mismatches, than add to data.frame as region
+right.df.outliers_t$region <- renamed_ROIs
+df.outliers$region <- renamed_ROIs
+```
+# Create in correct format
+```{r}
+# create df atlas
+desterieux <- as.data.frame(desterieux)
+
+# divide desterieux into left and right
+desterieux_r <- desterieux %>% filter(hemi == "right")
+desterieux_l <- desterieux %>% filter(hemi == "left")
+
+desterieux_r <- desterieux_r[grep("atlas|region|side|roi|label",names(desterieux_r))]
+
+desterieux_l <- desterieux_l[grep("atlas|region|side|roi|label",names(desterieux_l))]
+
+# merge left and right hemi outlier dfs respectively with the desterieux left and righ dfs
+left.df.outliers_t <- merge(desterieux_l, left.df.outliers_t, by= "region", all.x = TRUE) 
+
+right.df.outliers_t <- merge(desterieux_r, right.df.outliers_t, by= "region", all.x = TRUE) 
+
+# bind together 
+df.outliers_t1 <- rbind(left.df.outliers_t,right.df.outliers_t)
+
+rm(desterieux)
+
+```
+# Plot proportional outliers
+```{r}
+# Define the custom scale_fill_gradientn with fixed breaks and labels
+custom_scale_fill <- scale_fill_gradientn(
+  limits = c(0.025, 1), 
+  colours = rev(rainbow(5)), 
+  name = "Outlier Proportion", 
+  breaks = c(0.025, 0.25, 0.5, 0.75, 1), 
+  labels = c(">2.5%", "25%", "50%", "75%", "100%")
+)
+
+# Create individual plots with the custom scale using Desterieux atlas
+AD <- ggseg(.data = df.outliers, atlas = desterieux, mapping = aes(fill = proportion_A), colour = "white", size = 0.1) +
+  custom_scale_fill +
+  ggtitle("Alzheimer's Disease") +
+  theme(plot.title = element_text(hjust = 0.6, size = 14, family = "Arial", face = "bold"), 
+        legend.text = element_text(family = "Arial", color = "black"), 
+        legend.title = element_text(family = "Arial", color = "black"), 
+        axis.text = element_text(color = "white"))
+
+MCI <- ggseg(.data = df.outliers, atlas = desterieux, mapping = aes(fill = proportion_B), colour = "white", size = 0.1) +
+  custom_scale_fill +
+  ggtitle("Mild Cognitive Impairment") +
+  theme(plot.title = element_text(hjust = 0.6, size = 14, family = "Arial", face = "bold"), 
+        legend.text = element_text(family = "Arial", color = "black"), 
+        legend.title = element_text(family = "Arial", color = "black"), 
+        axis.text = element_text(color = "white"))
+
+FTD <- ggseg(.data = df.outliers, atlas = desterieux, mapping = aes(fill = proportion_C), colour = "white", size = 0.1) +
+  custom_scale_fill +
+  ggtitle("Frontotemporal Dementia") +
+  theme(plot.title = element_text(hjust = 0.6, size = 14, family = "Arial", face = "bold"), 
+        legend.text = element_text(family = "Arial", color = "black"), 
+        legend.title = element_text(family = "Arial", color = "black"), 
+        axis.text = element_text(color = "white"))
+
+Mixeddementia <- ggseg(.data = df.outliers, atlas = desterieux, mapping = aes(fill = proportion_D), colour = "white", size = 0.1) +
+  custom_scale_fill +
+  ggtitle("Mixed Dementia") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14, family = "Arial", face = "bold"), 
+        legend.text = element_text(family = "Arial", color = "black"), 
+        legend.title = element_text(family = "Arial", color = "black"), 
+        axis.text = element_text(color = "white"))
+
+OthernonADdem <- ggseg(.data = df.outliers, atlas = desterieux, mapping = aes(fill = proportion_E), colour = "white", size = 0.1) +
+  custom_scale_fill +
+  ggtitle("Other Non-Alzheimer's Dementia") +
+  theme(plot.title = element_text(hjust = 0.6, size = 14, family = "Arial", face = "bold"), 
+        legend.text = element_text(family = "Arial", color = "black"), 
+        legend.title = element_text(family = "Arial", color = "black"), 
+        axis.text = element_text(color = "white"))
+
+# Combine plots into a grid with individual legends
+final_plot <- plot_grid(AD, MCI, FTD, Mixeddementia, OthernonADdem, nrow = 5, labels = "AUTO")
+
+# Display the final plot
+print(final_plot)
+
+
+# Display the final plot
+print(final_plot)
+
+
+```
+#----------------------------------------------
+# - - - REGIONAL subcortical volumes for diagnosis  - - - 
+#----------------------------------------------
+# For SV only remove CT columns 
+```{r}
+df_sv <- df[, -c(203:350)] # need to check as manually selecting columns here. Alt way could grep 
+# find out length to work out % of outliers in group
+n <- length(unique(df_sv$RID))
+```
+
+## everyone seperated by timepoint (here can can change 'timepoint' for 'diagnosis' or any other catagorical variable you are interested in)
+```{r}
+
+df.outliers_ct <- df.outliers
+
+# subset into diagnostic groups
+A <- df_sv %>% filter(diagnosis == "AD") 
+B <- df_sv %>% filter(diagnosis == "MCI") 
+C <- df_sv %>% filter(diagnosis == "Frontotemporal dementia") 
+D <- df_sv %>% filter(diagnosis == "Mixed dementia (AD and vascular dementia)") 
+E <- df_sv %>% filter(diagnosis == "Other non-AD Dementias") 
+
+# find out length to work out % of outliers in group
+nA <- length(unique(A$RID))
+nB <- length(unique(B$RID))
+nC <- length(unique(C$RID))
+nD <- length(unique(D$RID))
+nE <- length(unique(E$RID))
+
+#AD
+A <- as.data.frame(sapply(X = A[,grep("_bin", names(df_sv),value = T)], FUN = function(x) sum(with(A,x))))
+colnames(A)[1] <- "count_A"
+A$proportion_A <- A$count/nA
+A <- dplyr::as_tibble(A, rownames = "ROI")
+
+#MCI
+B <- as.data.frame(sapply(X = B[,grep("_bin", names(df_sv),value = T)], FUN = function(x) sum(with(B,x))))
+colnames(B)[1] <- "count_B"
+B$proportion_B <- B$count/nB
+B <- dplyr::as_tibble(B, rownames = "ROI")
+
+#FTD
+C <- as.data.frame(sapply(X = C[,grep("_bin", names(df_sv),value = T)], FUN = function(x) sum(with(C,x))))
+colnames(C)[1] <- "count_C"
+C$proportion_C <- C$count/nC
+C <- dplyr::as_tibble(C, rownames = "ROI")
+
+#Mixed dementia
+D <- as.data.frame(sapply(X = D[,grep("_bin", names(df_sv),value = T)], FUN = function(x) sum(with(D,x))))
+colnames(D)[1] <- "count_D"
+D$proportion_D <- D$count/nD
+D <- dplyr::as_tibble(D, rownames = "ROI")
+
+#Other non-AD dementias
+E <- as.data.frame(sapply(X = E[,grep("_bin", names(df_sv),value = T)], FUN = function(x) sum(with(E,x))))
+colnames(E)[1] <- "count_E"
+E$proportion_E <- E$count/nE
+E <- dplyr::as_tibble(E, rownames = "ROI")
+
+# make proportions into one df
+df.outliers <- merge(A ,B, by="ROI", all.x = TRUE, all.y = TRUE)
+df.outliers <- merge(df.outliers ,C, by="ROI", all.x = TRUE, all.y = TRUE)
+df.outliers <- merge(df.outliers ,D, by="ROI", all.x = TRUE, all.y = TRUE)
+df.outliers <- merge(df.outliers ,E, by="ROI", all.x = TRUE, all.y = TRUE)
+df.outliers <- df.outliers %>%
+  filter(!(ROI %in% c("Ethnicity_bin", "Years.of.education_bin")))
+```
+#Convert existing data to aseg atlas
+```{r}
+data(aseg)
+force(aseg)
+aseg_labels <- as.data.frame(aseg)
+
+#merge via labels
+df.outliers$ROI <- gsub("_bin", "", df.outliers$ROI)
+df.outliers <- df.outliers %>% dplyr::rename("label" = "ROI")
+# Define a named vector with the new names for each label
+new_names <- c(
+  "Brain.Stem" = "Brain-Stem",
+  "Left.Amygdala" = "Left-Amygdala",
+  "Left.Caudate" = "Left-Caudate",
+  "Left.Hippocampus" = "Left-Hippocampus",
+  "Left.Lateral.Ventricle" = "Left-Lateral-Ventricle",
+  "Left.Pallidum" = "Left-Pallidum",
+  "Left.Putamen" = "Left-Putamen",
+  "Left.Thalamus.Proper" = "Left-Thalamus-Proper",
+  "Left.VentralDC" = "Left-VentralDC",
+  "Right.Amygdala" = "Right-Amygdala",
+  "Right.Caudate" = "Right-Caudate",
+  "right.cerebellum.white.matter" = "Right-Cerebellum-White-Matter",
+  "Right.Hippocampus" = "Right-Hippocampus",
+  "Right.Lateral.Ventricle" = "Right-Lateral-Ventricle",
+  "Right.Pallidum" = "Right-Pallidum",
+  "Right.Putamen" = "Right-Putamen",
+  "Right.Thalamus.Proper" = "Right-Thalamus-Proper",
+  "Right.VentralDC" = "Right-VentralDC",
+  "x3rd.ventricle" = "x3rd-ventricle",
+  "x4th.ventricle" = "x4th-ventricle"
+)
+
+# Apply the new names to the 'label' column
+df.outliers$label <- new_names[df.outliers$label]
+
+# Print the updated data frame to check the results
+
+df.outliers <- merge(aseg_labels, df.outliers, by= "label", all.x = TRUE) 
+df.outliers<- df.outliers[grep("region|proportion|hemi|type",names(df.outliers))]
+```
+# Plot proportional outliers
+```{r}
+# Define the custom scale_fill_gradientn with fixed breaks and labels
+custom_scale_fill <- scale_fill_gradientn(
+  limits = c(0.025, 1), 
+  colours = rev(rainbow(5)), 
+  name = "Outlier Proportion", 
+  breaks = c(0.025, 0.25, 0.5, 0.75, 1), 
+  labels = c(">2.5%", "25%", "50%", "75%", "100%")
+)
+
+# Create individual plots with the custom scale
+AD <- ggseg(.data = df.outliers, atlas = aseg, mapping = aes(fill = proportion_A), colour = "white", size = 0.1) +
+  custom_scale_fill +
+  theme(plot.title = element_text(hjust = 0.7, size = 14, family = "Arial", face = "bold"), 
+        legend.text = element_text(family = "Arial", color = "black"), 
+        legend.title = element_text(family = "Arial", color = "black"), 
+        axis.text = element_text(color = "white"))
+
+MCI <- ggseg(.data = df.outliers, atlas = aseg, mapping = aes(fill = proportion_B), colour = "white", size = 0.1) +
+  custom_scale_fill +
+  theme(plot.title = element_text(hjust = 0.7, size = 14, family = "Arial", face = "bold"), 
+        legend.text = element_text(family = "Arial", color = "black"), 
+        legend.title = element_text(family = "Arial", color = "black"), 
+        axis.text = element_text(color = "white"))
+
+FTD <- ggseg(.data = df.outliers, atlas = aseg, mapping = aes(fill = proportion_C), colour = "white", size = 0.1) +
+  custom_scale_fill +
+  theme(plot.title = element_text(hjust = 0.7, size = 14, family = "Arial", face = "bold"), 
+        legend.text = element_text(family = "Arial", color = "black"), 
+        legend.title = element_text(family = "Arial", color = "black"), 
+        axis.text = element_text(color = "white"))
+
+Mixeddementia <- ggseg(.data = df.outliers, atlas = aseg, mapping = aes(fill = proportion_D), colour = "white", size = 0.1) +
+  custom_scale_fill +
+  theme(plot.title = element_text(hjust = 0.7, size = 14, family = "Arial", face = "bold"), 
+        legend.text = element_text(family = "Arial", color = "black"), 
+        legend.title = element_text(family = "Arial", color = "black"), 
+        axis.text = element_text(color = "white"))
+
+OthernonADdem <- ggseg(.data = df.outliers, atlas = aseg, mapping = aes(fill = proportion_E), colour = "white", size = 0.1) +
+  custom_scale_fill +
+  theme(plot.title = element_text(hjust = 0.7, size = 14, family = "Arial", face = "bold"), 
+        legend.text = element_text(family = "Arial", color = "black"), 
+        legend.title = element_text(family = "Arial", color = "black"), 
+        axis.text = element_text(color = "white"))
+
+# Combine plots into a grid with individual legends
+final_plot1 <- plot_grid(AD, MCI, FTD, Mixeddementia, OthernonADdem, nrow = 5, labels = NULL)
+
+# Display the final plot
+print(final_plot1)
+
+```
+#Combine finalplot with finalplot1
+```{r}
+final_plot0 <- plot_grid(
+ final_plot, final_plot1,
+  labels = NULL,
+  hjust = -0.5, vjust = -0.5)
+
+print(final_plot0)
+```
+
+
+
+
