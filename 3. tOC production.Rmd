@@ -1,0 +1,500 @@
+---
+title: "tOC Production"
+Authors: Serena Verdi and James Cole 
+Adapted for QMIN-MC data sample by Sneha Prasanna
+
+This  script binerises the Z-scores produced by the normative modelling script into a total outlier count (tOC) metric for each participant, used for further analysis. The script also creates filtered data frames for available ACE-R, ACE-3 scores and Years of education. 
+
+output: html_notebook
+---
+```{r}
+library(cowplot)
+library(data.table)
+library(e1071)
+library(dplyr)
+library(ggplot2)
+library(plot.matrix)
+library(proxy)
+library(psych)
+library(tidyr)
+library(stringr)
+library(RPMG)
+library(viridis)
+library(effectsize)
+library(corrplot)
+library(ggseg)
+library(ggsegExtra) ## you may need this for the proportional outlier maps depending on your R version
+library(ggsegDesterieux) ## this is important for the proportional outlier maps 
+library(ggpubr)
+library(lme4)
+library(lmtest)
+library(arsenal)
+library(lmerTest)
+library(MuMIn)
+library(effects)
+library(ggeffects)
+library(readr)
+rm(list = ls())
+```
+# Clean files
+```{r}
+# z-scores generated from non-G NM google collab script (w/dummy rids to treat each brain scan individuals) 
+df <- read.csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Z-scores/Z-scores final final Sneha.csv")
+
+# Other phenotypic data I am interested in 
+#1. Load Variables file.csv
+#2. Load diagnosis_amended.csv
+#3. Load clinical scores
+#4. Merge clinical scores - DATE MATCH? 
+#5. Merge diagnosis_amended + variables by RID --> variables1
+#6. Merge #5variables1 with clinical scores - so relabel acertot37 to ACERTOTALSITE1, and ace3_35_atttot to ACETOTALSITE2. Then those RIDs who are from site 1 that do not have site 2, label as NA and vice versa. --> if NA does not work, just label it 0.
+
+#Label the final file as additional_variables
+variables <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Demographics/Variables.csv") 
+diagnosis_amended <- read_csv("//Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Demographics/diagnosis_amended.csv")
+clinicalscorescombined <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Demographics/Clinical Scores_inprogress.csv")
+
+sessions <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Demographics/Sessions.csv")
+colnames(sessions)[which(names(sessions) == "demog_11_wbicno")] <- "sub_id" 
+colnames(diagnosis_amended)[which(names(diagnosis_amended) == "RID")] <- "sub_id" 
+
+#7. Check if the visit date falls in the range - MATCH DATE? Yes or No 
+#8. If no or NA remove RID from merged1 and merged2
+
+##2.Have clinic1 (with site 1 tests) and clinic2(with site 2 tests) 
+#Columns in clinic 1 - sub_id, vis_01_dt, acer_37_acertot
+#Columns in clinic 2 - sub_id, vis_01_dt, ace3_35_attot, ace_iii_complete 
+clinic1 <- clinicalscorescombined[!is.na(clinicalscorescombined$acer_37_acertot), ] 
+clinic1 <- clinicalscorescombined[!is.na(clinicalscorescombined$acer_41_langtot), ] 
+clinic2 <- clinicalscorescombined[!is.na(clinicalscorescombined$ace3_34_ace3tot), ]
+clinic2 <- clinicalscorescombined[!is.na(clinicalscorescombined$ace3_38_langtot), ]
+
+#3. Load sessions file - scan_date col is important! Use grep function to retain the scan_date and sub_id column 
+sessions <- sessions[grep("sub_id|scan_date",names(sessions))]
+
+#4. Duplicate sessions file so that - sessions1 and sessions2
+sessions1 <- sessions
+sessions2 <- sessions
+
+#5. Now merge the clinic1 with sessions1 (merged1), clinic2 with sessions2 (merged2)
+ACER <- merge(clinic1, sessions1, by = "sub_id", all.x = TRUE)
+ACE3 <- merge(clinic2, sessions2, by = "sub_id", all.x = TRUE)
+
+ACER <- ACER [, !names(ACER) %in% c("ace_iii_complete", "ace3_35_atttot")]
+
+ACE3 <- ACE3 [, !names(ACE3) %in% c("ace_iii_complete", "acer_37_acertot")]
+
+ACER$vis_01_dt <- as.Date(ACER$vis_01_dt, format = "%d/%m/%Y")
+ACE3$vis_01_dt <- as.Date(ACE3$vis_01_dt, format = "%d/%m/%Y")
+
+ACER <- ACER %>% dplyr::rename("ACER_scores" = "acer_37_acertot")
+ACER <- ACER %>% dplyr::rename("ACER_langtot" = "acer_41_langtot")
+ACE3 <- ACE3 %>% dplyr::rename("ACE3_scores" = "ace3_34_ace3tot")
+ACE3 <- ACE3 %>% dplyr::rename("ACE3_langtot" = "ace3_38_langtot")
+
+ACER <- ACER %>% relocate("ACER_scores", .after = "scan_date") 
+ACER <- ACER %>% relocate("ACER_langtot", .after = "ACER_scores") 
+ACE3 <- ACE3 %>% relocate("ACE3_scores", .after = "scan_date") 
+ACE3 <- ACE3 %>% relocate("ACE3_langtot", .after = "ACE3_scores") 
+
+ACER <- ACER[!is.na(ACER$scan_date), ]
+ACE3<- ACE3[!is.na(ACE3$scan_date), ]
+
+  
+```
+
+#Clinical score date and brain scan dates were weeks apart for certain participants. Here a suitable range was determined using distribution maps and outliers to subset participants for ACE-III and ACE-R scores. The result was too wide for ACE-III as outliers in week ranges were from -95.1 (25% lower bound) weeks to 64.9 weeks (75% upper bound) from the brain scan, which may not be representative of the brain scan. ACE-III was more reasonable from -2.9 (25% lower bound) to 17.7 weeks, which was applied to both distributions to represent the participant's brain scan as closely as possible.  
+```{r}
+# Calculate the difference in days and update the "How many weeks?" column
+ACER <- ACER %>%
+  mutate('How many weeksR?' = as.numeric(difftime(scan_date, vis_01_dt, units = "weeks")))
+ACE3 <- ACE3 %>%
+  mutate('How many weeks3?' = as.numeric(difftime(scan_date, vis_01_dt, units = "weeks")))
+
+ggplot(ACER, aes(x = `How many weeksR?`)) + 
+  geom_density() + 
+  ggtitle("Distribution of weeks for ACER scores") +
+  xlab("Weeks Difference") +
+  ylab("Density") +
+  theme_minimal()
+
+ggplot(ACE3, aes(x = `How many weeks3?`)) + 
+  geom_density() + 
+  ggtitle("Distribution of weeks for ACE3 scores") +
+  xlab("Weeks Difference") +
+  ylab("Density") +
+  theme_minimal()
+  
+#ACE3
+# Calculate Q1 (25th percentile) and Q3 (75th percentile)
+Q1 <- quantile(ACE3$`How many weeks3?`, 0.25, na.rm = TRUE)
+Q3 <- quantile(ACE3$`How many weeks3?`, 0.75, na.rm = TRUE)
+# Calculate IQR
+IQR <- Q3 - Q1
+# Calculate lower and upper bounds for outliers
+ACE3_lower_bound <- Q1 - 1.5 * IQR
+ACE3_upper_bound <- Q3 + 1.5 * IQR
+# Identify outliers
+outliers <- ACE3$`How many weeks?`[ACE3$`How many weeks?` < ACE3_lower_bound | ACE3$`How many weeks3?` > ACE3_upper_bound]
+# Print results
+print(ACE3_lower_bound)
+print(ACE3_upper_bound)
+filtered_ACE3 <- ACE3[ACE3$`How many weeks3?` >= -2.5 & ACE3$`How many weeks3?` <= 17.5, ]
+filtered_ACE3 <- filtered_ACE3[-grep("vis_01_dt|scan_date|acer_41_langtot",names(filtered_ACE3))]
+
+#ACER
+# Calculate Q1 (25th percentile) and Q3 (75th percentile)
+Q1 <- quantile(ACER$`How many weeksR?`, 0.25, na.rm = TRUE)
+Q3 <- quantile(ACER$`How many weeksR?`, 0.75, na.rm = TRUE)
+# Calculate IQR
+IQR <- Q3 - Q1
+# Calculate lower and upper bounds for outliers
+ACER_lower_bound <- Q1 - 1.5 * IQR
+ACER_upper_bound <- Q3 + 1.5 * IQR
+# Identify outliers
+outliers <- ACER$`How many weeksR?`[ACER$`How many weeksR?` < ACER_lower_bound | ACER$`How many weeksR?` > ACER_upper_bound]
+# Print results
+print(ACER_lower_bound )
+print(ACER_upper_bound)
+filtered_ACER <- ACER[ACER$`How many weeksR?` >= -2.9 & ACER$`How many weeksR?` <= 17.7, ]
+filtered_ACER <- filtered_ACER[-grep("vis_01_dt|scan_date|ace3_34_ace3tot|ace3_38_langtot",names(filtered_ACER))]
+```
+
+# Create df for ALL rois (ct and ca)
+## Pull out all wanted data, so this cleans up all columns that we don't want
+```{r}
+df <- df[grep("sub_id|age|sex|Z_predict",names(df))] ## grep pulls out data, -grep removes data
+```
+### cortical thickness (ct) pull out & reformat
+```{r}
+## select ct
+ct <- df[grep("lh|rh",names(df))]
+
+## make Mean_Thickness variable
+ct$Mean_Thickness <- rowMeans(ct[,c('rh_MeanThickness_thickness_Z_predict', 'lh_MeanThickness_thickness_Z_predict')], na.rm=TRUE)
+ct <- ct %>% 
+       select(-c("rh_MeanThickness_thickness_Z_predict", "lh_MeanThickness_thickness_Z_predict"))
+
+## pull out other variables needed
+df1 <- df[grep("sub_id|age|sex",names(df))] 
+df1 <- cbind(df1,ct) ## bind to ct df
+
+colnames(df1) <- sub("_Z_predict", " ", colnames(df1)) ##remove unwanted string
+```
+### subcortical volumes (ca) pull out & reformat to fit ggseg atlas for regional analysis
+```{r}
+df <- df[-grep("lh|rh|Gray|vessel|CSF|Vol",names(df))]##remove unwanted cols
+
+colnames(df) <- sub("_Z_predict", " ", colnames(df))##remove unwanted string
+
+# add in aseg data
+data(aseg)
+force(aseg)
+aseg_labels <- as.data.frame(aseg) 
+
+
+# rename cols 
+df <- df %>% dplyr::rename("Left.Thalamus.Proper" = "Left.Thalamus.Proper ")
+df <- df %>% dplyr::rename("Right.Thalamus.Proper" = "Right.Thalamus.Proper ")
+df <- df %>% dplyr::rename("Left.Accumbens.area" = "Left.Accumbens.area ")
+df <- df %>% dplyr::rename("Brain.Stem" = "Brain.Stem ")
+df <- df %>% dplyr::rename("Right.Amygdala" = "Right.Amygdala ")
+df <- df %>% dplyr::rename("Left.Pallidum" = "Left.Pallidum ")
+df <- df %>% dplyr::rename("Left.choroid.plexus" = "Left.choroid.plexus ")
+df <- df %>% dplyr::rename("Right.Inf.Lat.Vent" = "Right.Inf.Lat.Vent ")
+df <- df %>% dplyr::rename("Left.VentralDC" = "Left.VentralDC ")
+df <- df %>% dplyr::rename("Left.Caudate" = "Left.Caudate ")
+df <- df %>% dplyr::rename("Right.Putamen" = "Right.Putamen ")
+df <- df %>% dplyr::rename("Right.choroid.plexus" = "Right.choroid.plexus ")
+df <- df %>% dplyr::rename("Right.Accumbens.area" = "Right.Accumbens.area ")
+df <- df %>% dplyr::rename("X3rd.Ventricle" = "X3rd.Ventricle ")
+df <- df %>% dplyr::rename("Right.Pallidum" = "Right.Pallidum ")
+df <- df %>% dplyr::rename("Left.Putamen" = "Left.Putamen ")
+df <- df %>% dplyr::rename("Left.Cerebellum.Cortex" = "Left.Cerebellum.Cortex ")
+df <- df %>% dplyr::rename("Right.Hippocampus" = "Right.Hippocampus ")
+df <- df %>% dplyr::rename("Right.Caudate" = "Right.Caudate ")
+df <- df %>% dplyr::rename("Right.Cerebellum.Cortex" = "Right.Cerebellum.Cortex ")
+df <- df %>% dplyr::rename("Left.Amygdala" = "Left.Amygdala ")
+df <- df %>% dplyr::rename("Left.Hippocampus" = "Left.Hippocampus ")
+df <- df %>% dplyr::rename("Right.Lateral.Ventricle" = "Right.Lateral.Ventricle ")
+df <- df %>% dplyr::rename("X4th.Ventricle" = "X4th.Ventricle ")
+df <- df %>% dplyr::rename("Left.Inf.Lat.Vent" = "Left.Inf.Lat.Vent ")
+df <- df %>% dplyr::rename("Right.VentralDC" = "Right.VentralDC ")
+df <- df %>% dplyr::rename("Left.Lateral.Ventricle" = "Left.Lateral.Ventricle ")
+df <- df %>% dplyr::rename("Left.Cerebellum.White.Matter" = "Left.Cerebellum.White.Matter ")
+df <- df %>% dplyr::rename("Right.Cerebellum.White.Matter" = "Right.Cerebellum.White.Matter ")
+df <- df %>% dplyr::rename("subject_id" = "sub_id")
+
+# invert ventricle Z-scores
+df$X3rd.Ventricle <- df$X3rd.Ventricle*-1
+df$Right.Lateral.Ventricle <- df$Right.Lateral.Ventricle*-1
+df$Left.Lateral.Ventricle <- df$Left.Lateral.Ventricle*-1
+df$X4th.Ventricle <- df$X4th.Ventricle*-1
+df$Right.Inf.Lat.Vent <- df$Right.Inf.Lat.Vent*-1
+df$Left.Inf.Lat.Vent <- df$Left.Inf.Lat.Vent*-1
+
+
+# rename cols
+df <- df %>% dplyr::rename("Left-Thalamus-Proper" = "Left.Thalamus.Proper")
+df <- df %>% dplyr::rename("Right-Thalamus-Proper" = "Right.Thalamus.Proper")
+df <- df %>% dplyr::rename("unknown1" = "Left.Accumbens.area")
+df <- df %>% dplyr::rename("Brain-Stem" = "Brain.Stem")
+df <- df %>% dplyr::rename("Right-Amygdala" = "Right.Amygdala")
+df <- df %>% dplyr::rename("Left-Pallidum" = "Left.Pallidum")
+df <- df %>% dplyr::rename("unknown2" = "Left.choroid.plexus")
+df <- df %>% dplyr::rename("unknown3" = "Right.Inf.Lat.Vent")
+df <- df %>% dplyr::rename("Left-VentralDC" = "Left.VentralDC")
+df <- df %>% dplyr::rename("Left-Caudate" = "Left.Caudate")
+df <- df %>% dplyr::rename("Right-Putamen" = "Right.Putamen")
+df <- df %>% dplyr::rename("unknown4" = "Right.choroid.plexus")
+df <- df %>% dplyr::rename("unknown5" = "Right.Accumbens.area")
+df <- df %>% dplyr::rename("x3rd-ventricle" = "X3rd.Ventricle")
+df <- df %>% dplyr::rename("Right-Pallidum" = "Right.Pallidum")
+df <- df %>% dplyr::rename("Left-Putamen" = "Left.Putamen")
+df <- df %>% dplyr::rename("unknown6" = "Left.Cerebellum.Cortex")
+df <- df %>% dplyr::rename("Right-Hippocampus" = "Right.Hippocampus")
+df <- df %>% dplyr::rename("Right-Caudate" = "Right.Caudate")
+df <- df %>% dplyr::rename("unknown7" = "Right.Cerebellum.Cortex")
+df <- df %>% dplyr::rename("Left-Amygdala" = "Left.Amygdala")
+df <- df %>% dplyr::rename("Left-Hippocampus" = "Left.Hippocampus")
+df <- df %>% dplyr::rename("Right-Lateral-Ventricle" = "Right.Lateral.Ventricle")
+df <- df %>% dplyr::rename("x4th-ventricle" = "X4th.Ventricle")
+df <- df %>% dplyr::rename("unknown8" = "Left.Inf.Lat.Vent")
+df <- df %>% dplyr::rename("Right-VentralDC" = "Right.VentralDC")
+df <- df %>% dplyr::rename("Left-Lateral-Ventricle" = "Left.Lateral.Ventricle")
+df <- df %>% dplyr::rename("unknown9" = "Left.Cerebellum.White.Matter")
+df <- df %>% dplyr::rename("right-cerebellum-white-matter" = "Right.Cerebellum.White.Matter")
+
+
+## fyi missing data from atlas
+#cc-anterior
+#cc-central
+#cc-mid-anterior
+#cc-mid-posterior
+#cc-posterior
+#right-cerebellum-cortex
+
+
+df <- df[-grep("unknown",names(df))] #remove unknown cols as we don't need them
+df1 <- df1[grep("thickness|Thickness|diagnosis",names(df1))] #remove unknown cols 
+
+rm(aseg_labels,aseg)
+```
+## merge ct and ca to make a clean df with just the neuroimaging data you want
+```{r}
+df <- cbind(df,df1)
+```
+# Merge other phenotypes
+```{r}
+variables <- variables %>% dplyr::rename("subject_id" = "sub_id")
+df <-  merge(df ,variables, by="subject_id", all.x = TRUE) 
+
+diagnosis_amended <- diagnosis_amended %>% dplyr::rename("subject_id" = "sub_id")
+df <-  merge(df ,diagnosis_amended, by="subject_id", all.x = TRUE) 
+
+
+filtered_ACER  <- filtered_ACER  %>% dplyr::rename("subject_id" = "sub_id")
+df <-  merge(df, filtered_ACER , by="subject_id", all.x = TRUE) 
+
+
+filtered_ACE3  <- filtered_ACE3  %>% dplyr::rename("subject_id" = "sub_id")
+df <-  merge(df, filtered_ACE3 , by="subject_id", all.x = TRUE) 
+df <- df %>% dplyr::rename("RID" = "subject_id")
+```
+# Reorder columns
+
+```{r}
+df <- df %>% relocate(ACER_scores, .after = sex)
+df <- df %>% relocate('How many weeksR?', .after = ACER_scores)
+df <- df %>% relocate(ACE3_scores, .after = 'How many weeksR?')
+df <- df %>% relocate('How many weeks3?', .after = ACE3_scores)
+df <- df %>% relocate("Years of education", .after = 'How many weeks3?')
+df <- df %>% relocate("Ethnicity", .after = "Years of education")
+df <- df %>% relocate("diagnosis", .after = sex)
+df <- df %>% relocate("grouped_diagnosis", .after = diagnosis)
+df <- df %>% relocate("ACER_langtot", .after = ACER_scores)
+df <- df %>% relocate("ACE3_langtot", .after = ACE3_scores)
+df <- df[-grep("days_since_baseline_scan.x|days_since_baseline_scan.y",names(df))]
+```
+# Data cleaning - ## Reformat categorical variables to factors
+```{r}
+# Replace "Alzheimer's disease" with "AD" in the diagnosis column
+df$diagnosis <- gsub("Alzheimer's disease", "AD", df$diagnosis, fixed = TRUE)
+# Replace "Mild Cognitive Impairment" with "MCI" in the diagnosis column
+df$diagnosis <- gsub("Mild Cognitive Impairment", "MCI", df$diagnosis)
+characters_to_remove <- c(
+  "Anxiety,", "Corticobasal Syndrome,", "Stroke,", ", Cerebellar syndrome with cognitive impairment", "Uncertain,", "Traumatic brain injury,", ", Uncertain", "Unspecified dementia,", ", Functional/Attentional Memory Disorder", "Cerebral Amyloid Angiopathy", 
+"progressive memory probs in context of epilepsy with atrophy and vascular burden,", ", Parkinson's disease", "Functional/Attentional Memory Disorder, ") 
+
+# Create pattern by collapsing characters with | (OR operator) and including comma
+pattern <- paste0(",?\\s*(", paste(characters_to_remove, collapse = "|"), ")")
+
+# Remove specified characters from the diagnosis column
+df$diagnosis <- gsub(pattern, "", df$diagnosis, ignore.case = TRUE)
+df$diagnosis <- trimws(df$diagnosis)
+# Ensure there are no leading/trailing spaces in the diagnosis column
+df$diagnosis <- gsub("^\\s+|\\s+$", "", df$diagnosis)
+
+# Replace words after "AD -" with an empty string
+df$diagnosis <- gsub("AD - .*", "AD", df$diagnosis)
+# Replace words after "AD -" with an empty string
+df$diagnosis <- gsub("Frontotemporal dementia - .*", "Frontotemporal dementia", df$diagnosis)
+# Replace ", Leucoencephalopathy" with an empty string
+df$diagnosis <- gsub(", Leucoencephalopathy", "", df$diagnosis)
+df$diagnosis <- gsub("Dementia with Lewy Bodies, AD", "Dementia with Lewy Bodies", df$diagnosis)
+df$diagnosis <- gsub("MCI, Mixed dementia \\(AD and vascular dementia\\)", "Mixed dementia (AD and vascular dementia)", df$diagnosis)
+df$diagnosis <- gsub("MCI, MCI", "MCI", df$diagnosis)
+df$diagnosis <- gsub("MCI, AD", "AD", df$diagnosis)
+```
+## Assign sex labels 
+```{r}
+## 1 = male 0 = female is how it is labelled in the google collab script (when generating the NM)
+
+df$sex <- gsub("1", "Male", df$sex)
+df$sex <- gsub("0", "Female", df$sex)
+df$sex <- factor(df$sex)
+
+```
+
+#Demographic table for all diagnoses (including disentangling the Other non-AD dementia group)
+```{r}
+summary_table <- df %>%
+  group_by(diagnosis) %>%
+  summarize(
+    n = n(),
+    mean_age = mean(age, na.rm = TRUE),
+    sd_age = sd(age, na.rm = TRUE),
+    min_age = min(age, na.rm = TRUE),
+    max_age = max(age, na.rm = TRUE),
+    mean_education = mean(`Years of education`, na.rm = TRUE),
+    sd_education = sd(`Years of education`, na.rm = TRUE),
+    min_education = min(`Years of education`, na.rm = TRUE),
+    max_education = max(`Years of education`, na.rm = TRUE),
+    mean_ace3 = mean(ACE3_scores, na.rm = TRUE),
+    sd_ace3 = sd(ACE3_scores, na.rm = TRUE),
+    min_ace3 = min(ACE3_scores, na.rm = TRUE),
+    max_ace3 = max(ACE3_scores, na.rm = TRUE),
+    mean_acer = mean(ACER_scores, na.rm = TRUE),
+    sd_acer = sd(ACER_scores, na.rm = TRUE),
+    min_acer = min(ACER_scores, na.rm = TRUE),
+    max_acer = max(ACER_scores, na.rm = TRUE),
+    mean_ace3_langtot = mean(ACE3_langtot, na.rm = TRUE),
+    sd_ace3_langtot = sd(ACE3_langtot, na.rm = TRUE),
+    min_ace3_langtot = min(ACE3_langtot, na.rm = TRUE),
+    max_ace3_langtot = max(ACE3_langtot, na.rm = TRUE),
+    mean_acer_langtot = mean(ACER_langtot, na.rm = TRUE),
+    sd_acer_langtot = sd(ACER_langtot, na.rm = TRUE),
+    min_acer_langtot = min(ACER_langtot, na.rm = TRUE),
+    max_acer_langtot = max(ACER_langtot, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# Print the summary table
+print(summary_table)
+
+
+sex_ratio <- df %>%
+  group_by(diagnosis) %>%
+  summarize(
+    male_count = sum(sex == "Male"),
+    female_count = sum(sex == "Female")
+  ) %>%
+  mutate(sex_ratio = male_count / female_count)
+print(sex_ratio)
+```
+
+
+```{r}
+df$diagnosis <- gsub("Alcohol related dementia", "Other non-AD Dementias - Alcohol related dementia", df$diagnosis)
+df$diagnosis <- gsub("Parkinson's disease dementia", "Other non-AD Dementias - Parkinson's disease dementia", df$diagnosis)
+df$diagnosis <- gsub("Frontal dementia of vascular etiology", "Other non-AD Dementias - Frontal dementia of vascular etiology", df$diagnosis)
+df$diagnosis <- gsub("Progressive Supranuclear Palsy", "Other non-AD Dementias - Progressive Supranuclear Palsy", df$diagnosis)
+df$diagnosis <- gsub("Vascular dementia", "Other non-AD Dementias - Vascular dementia", df$diagnosis)
+df$diagnosis <- gsub("F03X Unspecified dementia", "Other non-AD Dementias - F03X Unspecified dementia", df$diagnosis)
+df$diagnosis <- gsub("Dementia with Lewy Bodies", "Other non-AD Dementias - Dementia with Lewy Bodies", df$diagnosis)
+
+df <- df %>% relocate(diagnosis, .after = age) ##move to front to see the column easier
+df <- df %>% relocate(grouped_diagnosis, .after = diagnosis)
+df <- df[, !names(df) %in% c("grouped_diagnosis")]
+df$diagnosis <- as.factor(df$diagnosis) ## factoring is useful for future stats
+```
+
+## Brief check of number of scans within each group n = diagnosis 
+```{r}
+# Replace specific strings with "Other non-AD Dementias" for table display
+df$diagnosis <- gsub("Other non-AD Dementias - .*", "Other non-AD Dementias", df$diagnosis)
+# Create the table with the modified diagnosis column
+table(df$diagnosis)
+table(df$sex) #split across gender
+table(df$Ethnicity)
+```
+#----------------------------------------------
+#Create total outlier score
+#----------------------------------------------
+#Remove mean thickness
+```{r}
+#df <- df[-grep("lh_MeanThickness_thickness|rh_MeanThickness_thickness",names(df))] ## you can keep this, but I preferred to not use it in my analysis and doesn't make sense having in the tOC
+```
+# Pick threshold
+```{r}
+# outlier_threshold <- -1.65 ## bottom 5%
+outlier_threshold <- -1.96 ## bottom 2.5% ## I pick this to be consistent with other studies, and my prev work
+# outlier_threshold <- -2.58 ## bottom 0.05%
+```
+# Binerise outliers and create total_outlier score ACROSS total ROIs (score per participant)
+```{r}
+df3 <- as.data.frame(ifelse(df[,13:181] < outlier_threshold,1,0)) ##just threshold these certain columnspr
+df3 <- df3 %>% rename_all(paste0, "_bin") ## rename all binerised columns to have the suffix "_bin"
+df$tOC <- rowSums(df3, na.rm=T) ## add up all of binerised outliers to make tOC
+df <- cbind(df, df3)
+rm(df3)
+df <- df %>% relocate(tOC, .after = diagnosis) ## move tOC to front of df to visualize
+df <- df[-grep("Mean_Thickness_bin",names(df))]
+```
+#Generate filtered data files to use further in the analysis
+```{r}
+# --------------------- ACE3 and ACER scores -----------------------------------
+#Duplicate df to get an ACER file
+df_ACER_filtered <- df
+#Remove any NA values 
+df_ACER_filtered <- df %>%
+  mutate(ACER_scores = as.numeric(ACER_scores),
+         `How many weeksR?` = as.numeric(`How many weeksR?`)) %>%
+  filter(!is.na(ACER_scores) & !is.na(`How many weeksR?`))
+df_ACER_filtered <- df_ACER_filtered %>% select(-`How many weeks3?`, -"ACE3_scores")
+
+#Due to very small groups for some non-AD groups, they need to be grouped under "Other non-AD dementias" to ensure there are atleast 20 in each group for statistical analysis 
+df_ACER_filtered$diagnosis <- gsub("Mixed dementia \\(AD and vascular dementia\\)", "Non-AD Dementias", df_ACER_filtered$diagnosis)
+df_ACER_filtered$diagnosis <- gsub("Frontotemporal dementia", "Non-AD Dementias", df_ACER_filtered$diagnosis)
+df_ACER_filtered$diagnosis <- gsub("Other non-AD Dementias", "Non-AD Dementias", df_ACER_filtered$diagnosis)
+
+##Duplicate df to get an ACE3 file
+df_ACE3_filtered <- df
+df_ACE3_filtered <- df %>%
+  mutate(ACE3_scores = as.numeric(ACE3_scores),
+         `How many weeks3?` = as.numeric(`How many weeks3?`)) %>%
+  filter(!is.na(ACE3_scores) & !is.na(`How many weeks3?`))
+df_ACE3_filtered <- df_ACE3_filtered %>% select(-`How many weeksR?`, -"ACER_scores")
+
+#Due to very small groups for some non-AD groups, they need to be grouped under "Other non-AD dementias" to ensure there are atleast 20 in each group for statistical analysis 
+df_ACE3_filtered$diagnosis <- gsub("Mixed dementia \\(AD and vascular dementia\\)", "Non-AD Dementias", df_ACE3_filtered$diagnosis)
+df_ACE3_filtered$diagnosis <- gsub("Frontotemporal dementia", "Non-AD Dementias", df_ACE3_filtered$diagnosis)
+df_ACE3_filtered$diagnosis <- gsub("Other non-AD Dementias", "Non-AD Dementias", df_ACE3_filtered$diagnosis)
+
+df_ACE3_filtered <- df_ACE3_filtered[-grep("ACER_langtot",names(df_ACE3_filtered))]
+df_ACER_filtered <- df_ACER_filtered[-grep("ACE3_langtot",names(df_ACER_filtered))]
+#------------------------Education Clean ---------------------------------------
+
+df_edu_filtered <- df %>% filter(!is.na(`Years of education`))
+```
+
+#Export files
+```{r}
+write.csv(df, "toc_df.csv", row.names = FALSE)
+write.csv(df_ACE3_filtered, "df_ACE3_filtered.csv", row.names = FALSE)
+write.csv(df_ACER_filtered, "df_ACER_filtered.csv", row.names = FALSE)
+write.csv(df_edu_filtered, "df_edu_filtered.csv", row.names = FALSE)
+```
+
+
+
