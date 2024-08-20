@@ -1,0 +1,484 @@
+---
+title: "Data cleaning before Z-score generation"
+output:
+  html_notebook: default
+  word_document: default
+---
+Authors: 
+Serena Verdi
+
+Adapted to QMIN-MC sample by candidate HZWC3
+This script cleans and identifies suitable participants from raw files containing crucial information on QMIN-MC participants including:
+- Demographics 
+- MRI scans 
+- Clinical scores 
+
+Once suitable participants are identified, they are sub-divided into 2 data sets based on their diagnosis following the below criteria:
+- Adaptation data set (df_a) - Healthy, Functional/Attentional Memory Symptoms 
+- Test data set (df_t) - Any subtype of dementia
+
+These data sets will then be utilised on the PCN Python code which generates normative models using a Bayesian regression hierarchical framework. 
+
+#----------------------------------------------           
+## - - - Set up - - -
+#----------------------------------------------
+# Import libraries
+```{r setup}
+library(data.table)
+library(e1071)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(readr) #use readr package to ensure no corruption upon reading (as - can convert to .)
+```
+#Clear work space
+```{r}
+rm(list = ls())
+```
+#----------------------------------------------
+## - - - Prepare data  - - -
+#----------------------------------------------
+# Import FreeSurfer data (adapt if have timpoint data etc)
+#Load each sites data (individual files, combine them as site 1 and site 2, then merge them with site 2 files to create df1) From df1, generate the code to create a table with RIDs present in demographics, diagnosis, sessions and diagnosis amended. So create diagnosis amended from diagnosis. Gather a list of RIDs not present in all 4 files, then 
+```{r}
+# Cortical thickness data at both timepoints (1&2)
+ct_1_lh <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/CUH Site 1/aparc_stats_thickness_lh.csv")
+
+ct_1_rh <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/CUH Site 1/aparc_stats_thickness_rh.csv")
+
+ct_2_lh <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/CPFT Site 2/aparc_stats_thickness_lh.csv")
+  
+ct_2_rh <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/CPFT Site 2/aparc_stats_thickness_rh.csv")
+
+# Subcortical volume data at both timepoints (1&2)
+sv_1 <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/CUH Site 1/subcortical_vol.csv")
+sv_2 <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/CPFT Site 2/subcortical_vol.csv")
+
+# Template data for copying the format of input data for the normative model
+template <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/Template/Template.csv") 
+
+# Demographic data which is needed for the input data for the normative model
+demographics <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Demographics/Demographics.csv")
+sessions <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Demographics/Sessions.csv")
+clinicalscores <- read_csv("//Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Demographics/Clinical Scores.csv")
+diagnosis <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Demographics/Diagnosis.csv")
+```
+#rename 'subject' to 'RID' (optional)
+```{r}
+ct_1_lh <- ct_1_lh %>% dplyr::rename("RID" = "lh.aparc.a2009s.thickness")
+ct_1_rh <- ct_1_rh %>% dplyr::rename("RID" = "rh.aparc.a2009s.thickness")
+ct_2_lh <- ct_2_lh %>% dplyr::rename("RID" = "lh.aparc.a2009s.thickness")
+ct_2_rh <- ct_2_rh %>% dplyr::rename("RID" = "rh.aparc.a2009s.thickness")
+sv_1 <- sv_1 %>% dplyr::rename("RID" = "Measure:volume")
+sv_2 <- sv_2 %>% dplyr::rename("RID" = "Measure:volume")
+```
+# shorten RID to include just the id needed (optional)
+```{r}
+ct_1_lh$RID <- gsub("^\\.\\/sub\\-(\\d+)_ses\\-\\d+$", "\\1", ct_1_lh$RID)
+ct_1_rh$RID <- gsub("^\\.\\/sub\\-(\\d+)_ses\\-\\d+$", "\\1", ct_1_rh$RID)
+ct_2_lh$RID <- gsub("^\\.\\/sub\\-(\\d+)_ses\\-\\d+$", "\\1", ct_2_lh$RID)
+ct_2_rh$RID <- gsub("^\\.\\/sub\\-(\\d+)_ses\\-\\d+$", "\\1", ct_2_rh$RID)
+
+sv_1$RID <- gsub("^\\.\\/sub\\-(\\d+)_ses\\-\\d+$", "\\1", sv_1$RID)
+sv_2$RID <- gsub("^\\.\\/sub\\-(\\d+)_ses\\-\\d+$", "\\1", sv_2$RID)
+
+```
+#Merge cortical thickness together
+```{r}
+ct1 <- merge(ct_1_lh, ct_1_rh, by = "RID", all.x = TRUE)
+ct2 <- merge(ct_2_lh, ct_2_rh, by = "RID", all.x = TRUE)
+# Concatenate ct1 and ct2 vertically
+ct_combined <- bind_rows(ct1, ct2)
+```
+#Merge subcortical volumes together
+```{r}
+sv_combined <- bind_rows(sv_1, sv_2)
+```
+# Merge ct and sv to create df1 - containing all the brain scans for all the sites
+```{r}
+df1 <- merge(ct_combined, sv_combined) 
+```
+# Add demographic variables
+```{r}
+#Remove unnecessary columns in demographics 
+demographics <- demographics[, !names(demographics) %in% c("record_id", "participant_number","death_01_dod", "residence_04_carehome", "site_name", "demog_08_hand", "demog_09_yearsofeducation","ethnicity")]
+
+#Rename columns in demographics 
+colnames(demographics)[which(names(demographics) == "demog_11_wbicno")] <- "RID" 
+colnames(demographics)[which(names(demographics) == "demog_10_gender")] <- "sex" 
+demographics$sex <- ifelse(demographics$sex == "Male", 1, 0) 
+
+#Remove unecessary columns in sessions
+sessions <- sessions[, !names(sessions) %in% c("record_id", "days_since_baseline", "scan_site", "eulerLeft", "eulerRight", "scan_date")]
+
+#Rename columns in sessions 
+colnames(sessions)[which(names(sessions) == "demog_11_wbicno")] <- "RID" 
+colnames(sessions)[which(names(sessions) == "age_at_scan")] <- "age" 
+                          
+#Remove unnecessary columns in diagnosis 
+diagnosis <- diagnosis[, !names(diagnosis) %in% c("record_id", "date_of_diagnosis", "symptom_onset")] 
+
+#Rename columns in diagnosis 
+colnames(diagnosis)[which(names(diagnosis) == "demog_11_wbicno")] <- "RID" 
+
+#Remove columns in clinical scores 
+ clinicalscores <- clinicalscores[, !names(clinicalscores) %in% c("record_id")]
+ 
+# Rename demog_11_wbicno column to RID 
+colnames(clinicalscores)[which(names(clinicalscores) == "demog_11_wbicno")] <- "RID" 
+                              
+```
+# Create grouped_diagnosis file so you merge all the diagnosis into 1 
+```{r}
+diagnosis_amended <- diagnosis %>% group_by(RID) %>% summarise(diagnosis = paste(diagnosis, collapse = ', '), grouped_diagnosis = paste(grouped_diagnosis, collapse = ', ')) 
+
+rm(ct_1_lh,ct_1_rh, ct_2_lh, ct_2_rh,sv_1,sv_2) #clean up dfs
+```
+#Merge everything 
+
+```{r}
+# Merge df1, diagnosis_amended, and demographics by RID 
+df1_new <- merge(merge(df1, diagnosis_amended, by = "RID", all = TRUE), demographics, by = "RID", all = TRUE) 
+# Merge with sessions by RID 
+df1_new <- merge(df1_new, sessions, by = "RID", all = TRUE) 
+# Print the merged data frame 
+print(df1_new)
+```
+#RIDs to include and exclude 
+#Create a table 
+#Load table 
+#generate code to get a list that is not part of your included columns 
+#Remove them from your df1_new 
+
+```{r}
+subjects <- read_csv("/Users/snehaprasanna/Desktop/Serena Verdi Project/QMIN/Other final files/Table for subjects.csv")
+
+# Extract RIDs from each column
+clinical_scores_rids <- na.omit(subjects$`Clinical scores`)
+df1_rids <- na.omit(subjects$df1)
+diagnosis_rids <- na.omit(subjects$diagnosis_amended)
+sessions_rids <- na.omit(subjects$sessions)
+demographics_rids <- na.omit(subjects$demographics)
+# Find RIDs common across all specified columns
+common_rids <- Reduce(intersect, list(clinical_scores_rids, df1_rids, diagnosis_rids, sessions_rids, demographics_rids))
+# Print the common RIDs
+print(common_rids)
+# Ensure the "RIDs present in main 5" column exists and is initialised to NA
+if(!"RIDs present in main 5" %in% colnames(subjects)) {
+  subjects$`RIDs present in main 5` <- NA
+}
+
+# Store the common RIDs in the "RIDs present in main 5" column
+subjects$`RIDs present in main 5` <- NA
+subjects$`RIDs present in main 5`[1:length(common_rids)] <- common_rids
+
+
+# Extract RIDs from each column
+df1_rids <- na.omit(subjects$df1)
+diagnosis_rids <- na.omit(subjects$diagnosis_amended)
+sessions_rids <- na.omit(subjects$sessions)
+demographics_rids <- na.omit(subjects$demographics)
+clinical_scores_rids <- na.omit(subjects$`Clinical scores`)
+
+# Find RIDs common across the specified columns (df1, demographics, diagnosis_amended, sessions)
+common_rids_main4 <- Reduce(intersect, list(df1_rids, demographics_rids, diagnosis_rids, sessions_rids))
+
+# Exclude RIDs present in Clinical scores
+final_rids_main4 <- setdiff(common_rids_main4, clinical_scores_rids)
+
+# Print the final RIDs for main 4
+print(final_rids_main4)
+
+# Ensure the "RIDs present in main 4" column exists and is initialized to NA
+if(!"RIDs present in main 4" %in% colnames(subjects)) {
+  subjects$`RIDs present in main 4` <- NA
+}
+
+# Store the final RIDs in the "RIDs present in main 4" column
+subjects$`RIDs present in main 4` <- NA
+subjects$`RIDs present in main 4`[1:length(final_rids_main4)] <- final_rids_main4
+
+# Extract RIDs from each column and remove NAs
+clinical_scores_rids <- na.omit(subjects$`Clinical scores`)
+df1_rids <- na.omit(subjects$df1)
+diagnosis_rids <- na.omit(subjects$diagnosis_amended)
+sessions_rids <- na.omit(subjects$sessions)
+demographics_rids <- na.omit(subjects$demographics)
+
+# Find RIDs that satisfy combination 1
+common_rids_combination1 <- Reduce(intersect, list(df1_rids, sessions_rids, clinical_scores_rids, diagnosis_rids, demographics_rids))
+
+# Find RIDs that satisfy combination 2
+common_rids_combination2 <- Reduce(intersect, list(df1_rids, sessions_rids, diagnosis_rids, demographics_rids))
+
+# Combine all unique RIDs from the five columns
+all_rids <- unique(c(clinical_scores_rids, df1_rids, diagnosis_rids, sessions_rids, demographics_rids))
+
+# Combine RIDs from both combinations
+valid_rids <- unique(c(common_rids_combination1, common_rids_combination2))
+
+# Find RIDs that are not in the valid_rids
+rids_to_be_excluded <- setdiff(all_rids, valid_rids)
+
+# Print the RIDs to be excluded
+print(rids_to_be_excluded)
+
+# Ensure the "RIDs to be excluded" column exists and is initialized to NA
+if(!"RIDs to be excluded" %in% colnames(subjects)) {
+  subjects$`RIDs to be excluded` <- NA
+}
+
+# Store the RIDs to be excluded in the "RIDs to be excluded" column
+subjects$`RIDs to be excluded` <- NA
+subjects$`RIDs to be excluded`[1:length(rids_to_be_excluded)] <- rids_to_be_excluded
+```
+#Remove the RIDs from df1_new
+```{r}
+rids_to_remove <- c(25298, 31214, 31215, 31936, 33327, 33398, 33614, 34062, 34094, 34218, 34221, 34263, 34311, 34770, 34889, 35068, 35124, 35479, 35501, 36178, 36526, 36530, 36549, 36566,
+36569, 36618, 36637, 36644, 36669, 35225, 35597, 35661, 35770, 35788, 35871, 35872,
+35907, 35977, 36034, 36050, 36054, 36110, 36115, 36171, 36216, 36362, 36379, 36382,
+36770, 36778, 36786, 36805, 36817, 36835, 36836, 36837, 37032, 32083, 33329, 33790,
+34035, 34795, 34797, 35331, 36205, 36548, 36600, 36294, 36425, 36570, 36704, 36707,
+36715, 36716, 36762, 36763, 36777, 36833, 36928, 36999, 37025, 37026)
+
+df1_new <- df1_new[!df1_new$RID %in% rids_to_remove, ] 
+```
+#Add site data 
+```{r}
+# Add sitenum column based on site column
+ df1_new$sitenum <- ifelse(df1_new$site == 1, 1, ifelse(df1_new$site == 2, 2, NA)) 
+
+```
+#Reorder columns in df1_new
+```{r}
+# Reorder columns 
+df1_new <- df1_new[, c("RID", "diagnosis", "grouped_diagnosis", "sex", "site", "sitenum", "age", setdiff(names(df1_new), c("RID", "diagnosis", "grouped_diagnosis", "sex", "site", "sitenum", "age")))]
+```
+# Create df_a - Healthy and Functional/Attentional Memory Symptoms
+```{r}
+# Ensure there are no leading or trailing spaces in the 'grouped_diagnosis' column
+df1_new$grouped_diagnosis <- trimws(df1_new$grouped_diagnosis)
+
+# Filter rows containing either "Functional/Attentional Memory Symptoms" or "Healthy"
+df_a <- df1_new[grepl("Functional/Attentional Memory Symptoms|Healthy", df1_new$grouped_diagnosis), ]
+
+# Print the resulting dataframe to check if it worked
+print(df_a)
+
+df_a <- df_a %>%
+  filter(!grepl("AD|MCI|Psychiatric_disorders|Other_cognitive_disorders", grouped_diagnosis))
+
+```
+# Create df_t 
+```{r}
+
+# Filter rows based on the condition on the grouped_diagnosis column
+df_grouped <- df1_new %>%
+  filter(str_detect(grouped_diagnosis, "AD|Non-AD Dementia|MCI"))
+
+# Filter rows based on the condition on the diagnosis column
+df_diagnosis <- df1_new %>%
+  filter(str_detect(diagnosis, "F03X Unspecified dementia"))
+
+# Combine the results
+df_t <- bind_rows(df_grouped, df_diagnosis)
+
+```
+#----------------------------------------------
+## - - - Match column names of  adaptation and test datasets  - - -
+#----------------------------------------------
+# Column checks for test data set
+```{r}
+df_t <- df_t %>% rename(sub_id = RID) # extract column names from data and also template cols_template <- as.data.frame(colnames(template)) 
+cols_df_t <- as.data.frame(colnames(df_t)) # change location of some columns to match template df_t <- df_t %>% relocate(site, .after = sex) 
+
+colnames(df_t) <- sub("G_and_S", "G&S", colnames(df_t)) 
+df_t <- df_t %>% dplyr::rename("rh_G_Ins_lG&S_cent_ins_thickness" = "rh_G_Ins_lg_and_S_cent_ins_thickness") 
+df_t <- df_t %>% dplyr::rename("lh_G_Ins_lG&S_cent_ins_thickness" = "lh_G_Ins_lg_and_S_cent_ins_thickness")
+
+df_t <- df_t %>% relocate(sitenum, .after = site) 
+df_t <- df_t %>% relocate(age, .before = sex) 
+df_t <- df_t %>% relocate(sub_id, .before = age) # add in columns library(dplyr) 
+df_t <- mutate(df_t, `lh_G&S_frontomargin_thickness.1` = 0) 
+df_t <- df_t %>% relocate('lh_G&S_frontomargin_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_t <- mutate(df_t, `lh_G&S_occipital_inf_thickness.1` = 0) 
+df_t <- df_t %>% relocate('lh_G&S_occipital_inf_thickness.1', .before = 'rh_G&S_frontomargin_thickness')
+ df_t <- mutate(df_t, `lh_G&S_paracentral_thickness.1` = 0) 
+df_t <- df_t %>% relocate('lh_G&S_paracentral_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_t <- mutate(df_t, `lh_G&S_subcentral_thickness.1` = 0) 
+df_t <- df_t %>% relocate('lh_G&S_subcentral_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_t <- mutate(df_t, `lh_G&S_transv_frontopol_thickness.1` = 0) 
+df_t <- df_t %>% relocate('lh_G&S_transv_frontopol_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_t <- mutate(df_t, `lh_G&S_cingul-Ant_thickness.1` = 0) 
+df_t <- df_t %>% relocate('lh_G&S_cingul-Ant_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_t <- mutate(df_t, `lh_G&S_cingul-Mid-Ant_thickness.1` = 0) 
+df_t <- df_t %>% relocate('lh_G&S_cingul-Mid-Ant_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_t <- mutate(df_t, `lh_G&S_cingul-Mid-Post_thickness.1` = 0) 
+df_t <- df_t %>% relocate('lh_G&S_cingul-Mid-Post_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_t <- mutate(df_t, `lh_G_Ins_lg&S_cent_ins_thickness` = 0) 
+df_t <- df_t %>% relocate('lh_G_Ins_lg&S_cent_ins_thickness', .before = 'rh_G&S_frontomargin_thickness') 
+df_t <- mutate(df_t, `lh_S_intrapariet&P_trans_thickness` = 0) 
+df_t <- df_t %>% relocate('lh_S_intrapariet&P_trans_thickness', .before = 'rh_G&S_frontomargin_thickness') 
+df_t <- mutate(df_t, `lh_S_oc_middle&Lunatus_thickness` = 0) 
+df_t <- df_t %>% relocate('lh_S_oc_middle&Lunatus_thickness', .before = 'rh_G&S_frontomargin_thickness') 
+df_t <- mutate(df_t, `lh_S_oc_sup&transversal_thickness` = 0) 
+df_t <- df_t %>% relocate('lh_S_oc_sup&transversal_thickness', .before = 'rh_G&S_frontomargin_thickness') 
+df_t <- mutate(df_t, `lh_S_oc-temp_med&Lingual_thickness` = 0) 
+df_t <- df_t %>% relocate('lh_S_oc-temp_med&Lingual_thickness', .before = 'rh_G&S_frontomargin_thickness') 
+df_t <- mutate(df_t, `rh_G&S_frontomargin_thickness.1` = 0) 
+df_t <- df_t %>% relocate('rh_G&S_frontomargin_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_t <- mutate(df_t, `rh_G&S_occipital_inf_thickness.1` = 0) 
+df_t <- df_t %>% relocate('rh_G&S_occipital_inf_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_t <- mutate(df_t, `rh_G&S_paracentral_thickness.1` = 0) 
+df_t <- df_t %>% relocate('rh_G&S_paracentral_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_t <- mutate(df_t, `rh_G&S_subcentral_thickness.1` = 0) 
+df_t <- df_t %>% relocate('rh_G&S_subcentral_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_t <- mutate(df_t, `rh_G&S_transv_frontopol_thickness.1` = 0) 
+df_t <- df_t %>% relocate('rh_G&S_transv_frontopol_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_t <- mutate(df_t, `rh_G&S_cingul-Ant_thickness.1` = 0) 
+df_t <- df_t %>% relocate('rh_G&S_cingul-Ant_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_t <- mutate(df_t, `rh_G&S_cingul-Mid-Ant_thickness.1` = 0) 
+df_t <- df_t %>% relocate('rh_G&S_cingul-Mid-Ant_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_t <- mutate(df_t, `rh_G&S_cingul-Mid-Post_thickness.1` = 0) 
+df_t <- df_t %>% relocate('rh_G&S_cingul-Mid-Post_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_t <- mutate(df_t, `rh_G_Ins_lg&S_cent_ins_thickness` = 0) 
+df_t <- df_t %>% relocate('rh_G_Ins_lg&S_cent_ins_thickness', .before = 'Left-Lateral-Ventricle') 
+df_t <- mutate(df_t, `rh_S_intrapariet&P_trans_thickness` = 0) 
+df_t <- df_t %>% relocate('rh_S_intrapariet&P_trans_thickness', .before = 'Left-Lateral-Ventricle') 
+df_t <- mutate(df_t, `rh_S_oc_middle&Lunatus_thickness` = 0) 
+df_t <- df_t %>% relocate('rh_S_oc_middle&Lunatus_thickness', .before = 'Left-Lateral-Ventricle') 
+df_t <- mutate(df_t, `rh_S_oc_sup&transversal_thickness` = 0) 
+df_t <- df_t %>% relocate('rh_S_oc_sup&transversal_thickness', .before = 'Left-Lateral-Ventricle') 
+df_t <- mutate(df_t, `rh_S_oc-temp_med&Lingual_thickness` = 0) 
+df_t <- df_t %>% relocate('rh_S_oc-temp_med&Lingual_thickness', .before = 'Left-Lateral-Ventricle') 
+
+df_t <- df_t  %>% mutate(`BrainSegVolNotVentSurf` = 0)
+df_t <- df_t  %>% mutate(`Left-Thalamus-Proper` = 0)
+df_t <- df_t  %>% mutate(`Right-Thalamus-Proper` = 0)
+df_t <- df_t  %>% mutate(`SupraTentorialVolNotVentVox` = 0)
+
+df_t <- select(df_t, -BrainSegVolNotVent) 
+df_t <- select(df_t, -BrainSegVolNotVent.y) 
+df_t <- select(df_t, -eTIV.y)
+
+colnames(df_t)[which(names(df_t) == "BrainSegVolNotVent.x")] <- "BrainSegVolNotVent"
+
+colnames(df_t)[which(names(df_t) == "eTIV.x")] <- "eTIV"
+
+df_t <- df_t %>% replace(is.na(.), 0)
+
+``` 
+## checks for labeling and order for template
+```{r} 
+# Automated check for same labeling 
+template_cols <- colnames(template) # Extract the column names of original template 
+df_t <- df_t[, template_cols] # Reorder the columns of df_t based on the col order of template 
+columns_match <- identical(colnames(df_t), colnames(template)) # Double check if they have the same column names and order 
+# Print the result 
+if (columns_match) { print("Both data frames have the same column names and order.") } else { print("Column names or order are different between the data frames.") } 
+```
+#Column checks for adaptation data sets
+```{r}
+df_a <- df_a %>% rename(sub_id = RID) # extract column names from data and also template cols_template <- as.data.frame(colnames(template)) 
+cols_df_a <- as.data.frame(colnames(df_a)) # change location of some columns to match template df_t <- df_t %>% relocate(site, .after = sex) 
+
+colnames(df_a) <- sub("G_and_S", "G&S", colnames(df_a)) 
+df_a <- df_a %>% dplyr::rename("rh_G_Ins_lG&S_cent_ins_thickness" = "rh_G_Ins_lg_and_S_cent_ins_thickness") 
+df_a <- df_a %>% dplyr::rename("lh_G_Ins_lG&S_cent_ins_thickness" = "lh_G_Ins_lg_and_S_cent_ins_thickness")
+
+df_a <- df_a %>% relocate(sitenum, .after = site) 
+df_a <- df_a %>% relocate(age, .before = sex) 
+df_a <- df_a %>% relocate(sub_id, .before = age) # add in columns library(dplyr) 
+df_a <- mutate(df_a, `lh_G&S_frontomargin_thickness.1` = 0) 
+df_a <- df_a %>% relocate('lh_G&S_frontomargin_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_a <- mutate(df_a, `lh_G&S_occipital_inf_thickness.1` = 0) 
+df_a <- df_a %>% relocate('lh_G&S_occipital_inf_thickness.1', .before = 'rh_G&S_frontomargin_thickness')
+ df_a <- mutate(df_a, `lh_G&S_paracentral_thickness.1` = 0) 
+df_a <- df_a %>% relocate('lh_G&S_paracentral_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_a <- mutate(df_a, `lh_G&S_subcentral_thickness.1` = 0) 
+df_a <- df_a %>% relocate('lh_G&S_subcentral_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_a <- mutate(df_a, `lh_G&S_transv_frontopol_thickness.1` = 0) 
+df_a <- df_a %>% relocate('lh_G&S_transv_frontopol_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_a <- mutate(df_a, `lh_G&S_cingul-Ant_thickness.1` = 0) 
+df_a <- df_a %>% relocate('lh_G&S_cingul-Ant_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_a <- mutate(df_a, `lh_G&S_cingul-Mid-Ant_thickness.1` = 0) 
+df_a <- df_a %>% relocate('lh_G&S_cingul-Mid-Ant_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_a <- mutate(df_a, `lh_G&S_cingul-Mid-Post_thickness.1` = 0) 
+df_a <- df_a %>% relocate('lh_G&S_cingul-Mid-Post_thickness.1', .before = 'rh_G&S_frontomargin_thickness') 
+df_a <- mutate(df_a, `lh_G_Ins_lg&S_cent_ins_thickness` = 0) 
+df_a <- df_a %>% relocate('lh_G_Ins_lg&S_cent_ins_thickness', .before = 'rh_G&S_frontomargin_thickness') 
+df_a <- mutate(df_a, `lh_S_intrapariet&P_trans_thickness` = 0) 
+df_a <- df_a %>% relocate('lh_S_intrapariet&P_trans_thickness', .before = 'rh_G&S_frontomargin_thickness') 
+df_a <- mutate(df_a, `lh_S_oc_middle&Lunatus_thickness` = 0) 
+df_a <- df_a %>% relocate('lh_S_oc_middle&Lunatus_thickness', .before = 'rh_G&S_frontomargin_thickness') 
+df_a <- mutate(df_a, `lh_S_oc_sup&transversal_thickness` = 0) 
+df_a <- df_a %>% relocate('lh_S_oc_sup&transversal_thickness', .before = 'rh_G&S_frontomargin_thickness') 
+df_a <- mutate(df_a, `lh_S_oc-temp_med&Lingual_thickness` = 0) 
+df_a <- df_a %>% relocate('lh_S_oc-temp_med&Lingual_thickness', .before = 'rh_G&S_frontomargin_thickness') 
+df_a <- mutate(df_a, `rh_G&S_frontomargin_thickness.1` = 0) 
+df_a <- df_a %>% relocate('rh_G&S_frontomargin_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_a <- mutate(df_a, `rh_G&S_occipital_inf_thickness.1` = 0) 
+df_a <- df_a %>% relocate('rh_G&S_occipital_inf_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_a <- mutate(df_a, `rh_G&S_paracentral_thickness.1` = 0) 
+df_a <- df_a %>% relocate('rh_G&S_paracentral_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_a <- mutate(df_a, `rh_G&S_subcentral_thickness.1` = 0) 
+df_a <- df_a %>% relocate('rh_G&S_subcentral_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_a <- mutate(df_a, `rh_G&S_transv_frontopol_thickness.1` = 0) 
+df_a <- df_a %>% relocate('rh_G&S_transv_frontopol_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_a <- mutate(df_a, `rh_G&S_cingul-Ant_thickness.1` = 0) 
+df_a <- df_a %>% relocate('rh_G&S_cingul-Ant_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_a <- mutate(df_a, `rh_G&S_cingul-Mid-Ant_thickness.1` = 0) 
+df_a <- df_a %>% relocate('rh_G&S_cingul-Mid-Ant_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_a <- mutate(df_a, `rh_G&S_cingul-Mid-Post_thickness.1` = 0) 
+df_a <- df_a %>% relocate('rh_G&S_cingul-Mid-Post_thickness.1', .before = 'Left-Lateral-Ventricle') 
+df_a <- mutate(df_a, `rh_G_Ins_lg&S_cent_ins_thickness` = 0) 
+df_a <- df_a %>% relocate('rh_G_Ins_lg&S_cent_ins_thickness', .before = 'Left-Lateral-Ventricle') 
+df_a <- mutate(df_a, `rh_S_intrapariet&P_trans_thickness` = 0) 
+df_a <- df_a %>% relocate('rh_S_intrapariet&P_trans_thickness', .before = 'Left-Lateral-Ventricle') 
+df_a <- mutate(df_a, `rh_S_oc_middle&Lunatus_thickness` = 0) 
+df_a <- df_a %>% relocate('rh_S_oc_middle&Lunatus_thickness', .before = 'Left-Lateral-Ventricle') 
+df_a <- mutate(df_a, `rh_S_oc_sup&transversal_thickness` = 0) 
+df_a <- df_a %>% relocate('rh_S_oc_sup&transversal_thickness', .before = 'Left-Lateral-Ventricle') 
+df_a <- mutate(df_a, `rh_S_oc-temp_med&Lingual_thickness` = 0) 
+df_a <- df_a %>% relocate('rh_S_oc-temp_med&Lingual_thickness', .before = 'Left-Lateral-Ventricle') 
+
+df_a <- df_a  %>% mutate(`BrainSegVolNotVentSurf` = 0)
+df_a <- df_a %>% mutate(`Left-Thalamus-Proper` = 0)
+df_a <- df_a  %>% mutate(`Right-Thalamus-Proper` = 0)
+df_a <- df_a  %>% mutate(`SupraTentorialVolNotVentVox` = 0)
+
+df_a <- select(df_a, -BrainSegVolNotVent) 
+df_a <- select(df_a, -BrainSegVolNotVent.y) 
+df_a <- select(df_a, -eTIV.y)
+
+colnames(df_a)[which(names(df_a) == "BrainSegVolNotVent.x")] <- "BrainSegVolNotVent"
+
+colnames(df_a)[which(names(df_a) == "eTIV.x")] <- "eTIV"
+
+df_a <- df_a %>% replace(is.na(.), 0)
+
+```
+## checks for labeling and order in adaptation data set
+```{r}
+# Automated check for same labeling 
+template_cols <- colnames(template) # Extract the column names of original template 
+df_a <- df_a[, template_cols] # Reorder the columns of df_a based on the col order of template 
+columns_match <- identical(colnames(df_a), colnames(template)) # Double check if they have the same column names and order 
+# Print the result 
+if (columns_match) { print("Both data frames have the same column names and order.") } else { print("Column names or order are different between the data frames.") } 
+
+```
+#----------------------------------------------
+## - - - Save variables  - - -
+#----------------------------------------------
+```{r}
+# Check if there are any matches in sub_id between df_a and df_t
+if (any(df_a$sub_id %in% df_t$sub_id)) {
+  print("There are matches in sub_id between df_a and df_t.")
+} else {
+  print("There are no matches in sub_id between df_a and df_t.")
+}
+
+write.csv(df_a, "dfa_final.csv", row.names=FALSE)
+write.csv(df_t, "dft_final.csv", row.names = FALSE)
+```
